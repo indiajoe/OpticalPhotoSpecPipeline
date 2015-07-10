@@ -39,6 +39,7 @@ import readline
 import shutil
 import subprocess
 import time
+import datetime
 from astropy.time import Time
 from astropy.io import ascii
 import astropy.table as table 
@@ -313,15 +314,15 @@ def Photometry(PC):
         intime = float(imgline[2])
         threshold = float(imgline[3])
         try :
-            DateStr = fits.convenience.getval(img,PC.DATEHDR)  #Reading from Headers
-            Year,month,day = DateStr.split('.')
+            DateStr = imgline[4]
+            Year,month,day = DateStr.split('-')
         except KeyError:    #Old data didn't have this header
             if '-' in wdir:
                 Year,month,day = wdir.split('-')
             else:
                 Year,month,day=wdir[:4],wdir[4:6],wdir[6:8]  # Will work only if the directory was named YYYYMMDD
 
-        StartUTStr = fits.convenience.getval(img,PC.UTHDR)  #Reading from Headers
+        StartUTStr = imgline[5]
         h,m,s = StartUTStr.split(':')
         StartUT = int(h)*60*60+int(m)*60+int(float(s))   #Converting to seconds
 
@@ -940,9 +941,10 @@ def Createlist_subrout(PC):
             #First we load a dictionary of raw images to their filters
             with open(os.path.join(PC.MOTHERDIR,PC.OUTDIR,night,'AllObjects.List'),'r') as FiltrFILE:
                 FiltrFILElist = list(FiltrFILE)
-                Filtrfiledic = dict([(filtset.split()[0],shlex.split(filtset.rstrip())[1]) for filtset in FiltrFILElist])  #Dictionary of filterset for each image.
-                Exptimefiledic = dict([(filtset.split()[0],shlex.split(filtset.rstrip())[2]) for filtset in FiltrFILElist])  #Dictionary of filterset for each image.
-
+            Filtrfiledic = dict([(filtset.split()[0],shlex.split(filtset.rstrip())[1]) for filtset in FiltrFILElist])  #Dictionary of filterset for each image.
+            Exptimefiledic = dict([(filtset.split()[0],shlex.split(filtset.rstrip())[2]) for filtset in FiltrFILElist])  #Dictionary of filterset for each image.
+            Datefiledic = dict([(filtset.split()[0],shlex.split(filtset.rstrip())[3]) for filtset in FiltrFILElist])  #Dictionary of filterset for each image.
+            Timefiledic = dict([(filtset.split()[0],shlex.split(filtset.rstrip())[4]) for filtset in FiltrFILElist])  #Dictionary of filterset for each image.
             #Now Read and write the images to do photometry one by one.
             if PC.IMGCOMBINE == 'Y':
                 ImgsFILE = open(PC.GetFullPath('AllObjects-ProcessedCombinedImg.List'),'r')
@@ -960,7 +962,9 @@ def Createlist_subrout(PC):
             imgKey = imgline.rstrip().split()[0]
             imgfilter = Filtrfiledic[imgKey]
             imgexptime = Exptimefiledic[imgKey]
-            fooOUT.write('{0}  "{1}"  {2}  {3}\n'.format(PC.GetFullPath(img),imgfilter,imgexptime,PC.THRESHOLD))
+            date = Datefiledic[imgKey]
+            time = Timefiledic[imgKey]
+            fooOUT.write('{0}  "{1}"  {2}  {3} {4} {5}\n'.format(PC.GetFullPath(img),imgfilter,imgexptime,PC.THRESHOLD,date,time))
         ImgsFILE.close()
     fooOUT.close()
     print('All nights over...')
@@ -1001,7 +1005,7 @@ def AlignNcombine_subrout(PC,method="average"):
                         OutCombimg = os.path.splitext(imglist[0].split()[1])+'_align'+method+'_'+os.path.splitext(imglist[-1].split()[1])+'.fits'
                         imcombineInputfname = PC.GetFullPath(os.path.splitext(OutCombimg)[0]+'.imcomblist')
                         with open(imcombineInputfname,'w') as imcombineFILE:
-                            imcombineFILE.write('\n'.join([PC.GetFullPath(imgline.split()[1]) for imgline in imglist]))
+                            imcombineFILE.write('\n'.join([PC.GetFullPath(imgline.split()[1]) for imgline in imglist])+'\n')
                         ImgCombineWithZeroFloating(imcombineInputfname,PC.GetFullPath(OutCombimg),cmethod=method,czero="median",creject="sigclip",cstatsection=PC.FLATSTATSECTION)
                     outObjectFinalFILE.write('{0}  {1}\n'.format(objimgKey,OutCombimg))
             #Done! Close the file, and continue to next directory.....
@@ -1027,7 +1031,7 @@ def AlignNcombine_subrout(PC,method="average"):
                 if len(imglist) == 1 : #Single image. nothing to align and combine
                     OutCombimg = imglist[0].split()[1]
                 elif len(imglist) > 1 :
-                    OutCombimg = os.path.splitext(imglist[0].split()[1])+'_align'+method+'_'+os.path.splitext(imglist[-1].split()[1])+'.fits'
+                    OutCombimg = os.path.splitext(imglist[0].split()[1])[0]+'_align'+method+'_'+os.path.splitext(imglist[-1].split()[1])[0]+'.fits'
                     
 
                     OutCoofile = os.path.splitext(OutCombimg)[0]+'.GScoo'
@@ -1204,8 +1208,8 @@ def Bias_Flat_basicCorrections_subrout(PC,method="median"):
         #Load all the FilterSet indexing file data
         with open(os.path.join(PC.MOTHERDIR,PC.OUTDIR,night,'AllObjects.List'),'r') as FiltrFILE :
             FiltrFILElist = list(FiltrFILE)
-            Filtrfiledic = dict([(filtset.split()[0],shlex.split(filtset.rstrip())[1]) for filtset in FiltrFILE])  #Dictionary of filterset for each image.
-            Exptimefiledic = dict([(filtset.split()[0],shlex.split(filtset.rstrip())[2]) for filtset in FiltrFILE])  #Dictionary of exptime for each image.
+        Filtrfiledic = dict([(filtset.split()[0],shlex.split(filtset.rstrip())[1]) for filtset in FiltrFILElist])  #Dictionary of filterset for each image.
+        Exptimefiledic = dict([(filtset.split()[0],shlex.split(filtset.rstrip())[2]) for filtset in FiltrFILElist])  #Dictionary of exptime for each image.
 
         if PC.OVERSCAN != 'N': #Overscan Subtracting to be done
             print('Doing Overscan subtraction from: {0}'.format(PC.OVERSCAN))
@@ -1215,8 +1219,9 @@ def Bias_Flat_basicCorrections_subrout(PC,method="median"):
             LampfiledicOS = {}
             SkyfiledicOS = {}
             for objimg in Biasfiledic:
+                print('DEBUG: '+objimg)
                 OSobjimg = PC.GetFullPath(os.path.splitext(objimg)[0]+OSsuffix)
-                iraf.colbias(input=objimg,output=OSobjimg, bias=PC.OVERSCAN, interactive='no') # Main object image
+                iraf.colbias(input=PC.GetFullPath(objimg),output=OSobjimg, bias=PC.OVERSCAN, interactive='no') # Main object image
                 BiasfiledicOS[objimg] = []
                 for biasimg in Biasfiledic[objimg]:
                     outputimg = PC.GetFullPath(os.path.splitext(biasimg)[0]+OSsuffix)
@@ -1261,8 +1266,9 @@ def Bias_Flat_basicCorrections_subrout(PC,method="median"):
         ObjectSkyDic = {}   # To store the SKY corresponding to each object frame
         ObjectFinalImgDic = {}  ## To store the FINAL Image corresponding to each object frame
         for objimgKey in Biasfiledic:
-            objimg = objimgKey if (PC.OVERSCAN == 'N') else os.path.splitext(objimg)[0]+OSsuffix
+            objimg = objimgKey if (PC.OVERSCAN == 'N') else os.path.splitext(objimgKey)[0]+OSsuffix
             ####### Combine Bias frames.
+            print('Combining Bias frames for '+objimg)
             OutMasterBias = os.path.splitext(objimg)[0]+'_Bias.fits'
             BiasKey = ''.join(sorted(Biasfiledic[objimgKey]))  # a Key to uniquely identify the bias combination.
             try:  # symlink if the bias is already created
@@ -1271,7 +1277,7 @@ def Bias_Flat_basicCorrections_subrout(PC,method="median"):
                 # Create the Master bias and add to the dictionary
                 OutMasterBiasList = os.path.splitext(objimg)[0]+'_Bias.list'
                 with open(PC.GetFullPath(OutMasterBiasList),'w') as biaslistFILE:
-                    biaslistFILE.write('\n'.join([PC.GetFullPath(biasimg) for biasimg in Biasfiledic[objimgKey]]))
+                    biaslistFILE.write('\n'.join([PC.GetFullPath(biasimg) for biasimg in Biasfiledic[objimgKey]])+'\n')
                 iraf.zerocombine(input= "@"+PC.GetFullPath(OutMasterBiasList), output=PC.GetFullPath(OutMasterBias), combine="median", ccdtype="")
                 # Add to the dictionary
                 MasterBiasDic[BiasKey] = OutMasterBias
@@ -1290,6 +1296,7 @@ def Bias_Flat_basicCorrections_subrout(PC,method="median"):
 
             ###### Combine Flat frames.
             if Flatfiledic[objimgKey]:  # If flats exist!
+                print('Creating flat for '+objimg)
                 OutMasterFlat = os.path.splitext(objimg)[0]+'_flat.fits'
                 FlatKey = ''.join(sorted(Flatfiledic[objimgKey]))  # a Key to uniquely identify the flat combination.
                 try:  # symlink if the flat is already created
@@ -1305,7 +1312,7 @@ def Bias_Flat_basicCorrections_subrout(PC,method="median"):
                     outflatname = os.path.splitext(OutMasterFlat)[0]+'_unNorm.fits'
                     OutMasterFlatList = os.path.splitext(objimg)[0]+'_Flat.list'
                     with open(PC.GetFullPath(OutMasterFlatList),'w') as flatlistFILE:
-                        flatlistFILE.write('\n'.join([PC.GetFullPath(bsflatimgs) for bsflatimgs in BSflatimgs]))
+                        flatlistFILE.write('\n'.join([PC.GetFullPath(bsflatimgs) for bsflatimgs in BSflatimgs])+'\n')
 
                     print('Image section used for statistics of Flat is '+PC.FLATSTATSECTION)
                     iraf.imcombine(input='@'+PC.GetFullPath(OutMasterFlatList), output=PC.GetFullPath(outflatname), combine="median", scale="median",reject="sigclip", statsec=PC.FLATSTATSECTION)
@@ -1329,6 +1336,7 @@ def Bias_Flat_basicCorrections_subrout(PC,method="median"):
             ####### Bias/Sky subtract object frame
             BiasRemovedObjimg = os.path.splitext(objimg)[0]+'_BS.fits'
             if PC.SEPARATESKY=='Y': 
+                print('Subtracting sky from '+objimg)
                 ####### Combine Sky frames and subtract it instead of bias
                 OutMasterSky = os.path.splitext(objimg)[0]+'_Sky.fits'
                 SkyKey = ''.join(sorted(Skyfiledic[objimgKey]))  # a Key to uniquely identify the bias combination.
@@ -1338,7 +1346,7 @@ def Bias_Flat_basicCorrections_subrout(PC,method="median"):
                     # Create the Master sky and add to the dictionary
                     OutMasterSkyList = os.path.splitext(objimg)[0]+'_Sky.list'
                     with open(PC.GetFullPath(OutMasterSkyList),'w') as skylistFILE:
-                        skylistFILE.write('\n'.join([PC.GetFullPath(skyimg) for skyimg in Skyfiledic[objimgKey]]))
+                        skylistFILE.write('\n'.join([PC.GetFullPath(skyimg) for skyimg in Skyfiledic[objimgKey]])+'\n')
                     ImgCombineWithZeroFloating(PC.GetFullPath(OutMasterSkyList),PC.GetFullPath(OutMasterSky),cmethod="median",czero="median",creject="pclip",cstatsection=PC.FLATSTATSECTION)
                     # Add to the dictionary
                     MasterSkyDic[SkyKey] = OutMasterSky
@@ -1349,10 +1357,12 @@ def Bias_Flat_basicCorrections_subrout(PC,method="median"):
                 iraf.imarith(operand1=PC.GetFullPath(objimg),op="-",operand2=PC.GetFullPath(ObjectSkyDic[objimgKey]),result=PC.GetFullPath(BiasRemovedObjimg))
                                              
             else:  # Subtract the Bias directly
+                print('Subtracting Bias from '+objimg)
                 iraf.imarith(operand1=PC.GetFullPath(objimg),op="-",operand2=PC.GetFullPath(ObjectBiasDic[objimgKey]),result=PC.GetFullPath(BiasRemovedObjimg))
 
             ###### Apply Flat correction to only object frames
             if ObjectFlatDic[objimgKey] is not None:  # Flat exists
+                print('Flat correcting '+objimg)
                 OutFCobjimg = os.path.splitext(BiasRemovedObjimg)[0]+'_FC.fits'
                 iraf.imarith(operand1=PC.GetFullPath(BiasRemovedObjimg),op="/",operand2=PC.GetFullPath(ObjectFlatDic[objimgKey]),result=PC.GetFullPath(OutFCobjimg))
                 # Update the name of output file.
@@ -1365,6 +1375,7 @@ def Bias_Flat_basicCorrections_subrout(PC,method="median"):
             
             #If asked to do a smooth gradient removal in image, do it after everything is over now..
             if PC.GRADREMOVE == 'Y':
+                print('Removing smooth Gradint from '+objimg)
                 OutGSobjimg = os.path.splitext(OutFinalimg)[0]+'_GS.fits'
                 #If Filter subtraciton was sucessfull it will return the output filename, else inputname
                 OutGSobjimg = SubtractSmoothGradient(PC,PC.GetFullPath(OutFCobjimg),PC.GetFullPath(OutGSobjimg))
@@ -1376,6 +1387,7 @@ def Bias_Flat_basicCorrections_subrout(PC,method="median"):
         # Now write all the output files required for the next step.
         with open(os.path.join(PC.MOTHERDIR,PC.OUTDIR,night,'AllObjects2Combine.List'),'r') as Obj2CombFILE :
             NewFilter = 'Blah'
+            NewExptime = '-999'
             OutObjectFinalfilename = 'AllObjects-ProcessedImg.List'
             outObjectFinalFILE = open(os.path.join(PC.MOTHERDIR,PC.OUTDIR,night,OutObjectFinalfilename),'w')
             if PC.TODO == 'S':
@@ -1397,9 +1409,9 @@ def Bias_Flat_basicCorrections_subrout(PC,method="median"):
                 if (PC.TODO == 'P') and ((OldFilter != NewFilter) or (float(OldExptime) != float(NewExptime))) : 
                     outObjectFinalFILE.write('\n')
                 # Write the output file
-                outObjectFinalFILE.write('{0}  {1}\n'.write(objimgKey,ObjectFinalImgDic[objimgKey]))
+                outObjectFinalFILE.write('{0}  {1}\n'.format(objimgKey,ObjectFinalImgDic[objimgKey]))
                 if PC.TODO == 'S': # Also create the log of image and its new Lamp
-                    outObjectLampFILE.write('{0}  {1}\n'.write(objimgKey,ObjectLampDic[objimgKey]))
+                    outObjectLampFILE.write('{0}  {1}\n'.format(objimgKey,ObjectLampDic[objimgKey]))
                 
             outObjectFinalFILE.close()
             if PC.TODO == 'S': outObjectLampFILE.close()
@@ -1618,8 +1630,10 @@ def SelectionofFrames_subrout(PC):
                 Name = shlex.split(Objline)[0]
                 FiltOrGrism = shlex.split(Objline)[FiltColumn]
                 Exptime = shlex.split(Objline)[2]
+                Date = shlex.split(Objline)[7]
+                Time = shlex.split(Objline)[8]
                 FiltList.add(FiltOrGrism)
-                ObjFILE.write('{0}   "{1}"  {2}\n'.format(Name,FiltOrGrism,Exptime))
+                ObjFILE.write('{0}   "{1}"  {2}  {3} {4}\n'.format(Name,FiltOrGrism,Exptime,Date,Time))
 
         if not FiltList : #No files in this directory
             print('\033[91m ALERT: \033[0m No Images to reduce found in directory : {0}'.format(night))
@@ -1768,13 +1782,13 @@ def CreateLogFilesFromFits_subrout(PC,hdu=0):
         with open(LogFilename,'w') as outfile:
             for i,img in enumerate(listOFimgs):
                 hdulist = fits.open(img)
-                ImgSizeX, ImgSizeY = hdulist[hdu].data.shape()
+                ImgSizeX, ImgSizeY = hdulist[hdu].data.shape
                 prihdr = hdulist[hdu].header
                 prihdr = Instrument.StandardiseHeader(prihdr)
                 for hkeys in LogColumns :   #Capture if these keywords are missing in header, and replace with -NA-
                     if hkeys not in prihdr : prihdr[hkeys]='-NA-'
                 
-                outfile.write(img+' '+RowString.format(prihdr)+' {0} {1} {2}\n'.format(ImgSizeX,ImgSizeY,i))
+                outfile.write(img+' '+RowString.format(**prihdr)+' {0} {1} {2}\n'.format(ImgSizeX,ImgSizeY,i))
                 hdulist.close()
     print("{0} saved in each night's directory. Edit in manually for errors like ACTIVE filter.".format(LogFilename))
 
@@ -1915,10 +1929,15 @@ class PipelineConfig(object):
                         self.VER = con.split()[1]
                     elif con.split()[0] == "TEXTEDITOR=" :
                         self.TEXTEDITOR = shlex.split(con)[1]
+                    elif con.split()[0] == "OVERSCAN=" :
+                        self.OVERSCAN = con.split()[1]
                     elif con.split()[0] == "COMBINEIMGS=" :
                         self.IMGCOMBINE = con.split()[1][0].upper()
                     elif con.split()[0] == "IMGCOMBMETHOD=" :
                         self.IMGCOMBMETHOD = con.split()[1]
+                    elif con.split()[0] == "FLATSTATSECTION=" :
+                        self.FLATSTATSECTION = con.split()[1]
+
                     elif con.split()[0] == "SEPARATE_SKY=" :
                         self.SEPARATESKY = con.split()[1][0].upper()
                     elif con.split()[0] == "GRADIENT_REMOVE=" :
@@ -2082,7 +2101,8 @@ class InstrumentObject(object):
     def StandardiseHeader(self,prihdr):
         """ Return the heared object after standardising the values in it, specific to instrument."""
         if self.Name == 'HFOSC':
-            pass
+            ut_sec = float(prihdr[self.PC.UTHDR])
+            prihdr[self.PC.UTHDR] = str(datetime.timedelta(seconds=ut_sec))  # Converting to HH:MM:SS
         elif self.Name == 'IFOSC':
             prihdr[self.PC.EXPTIMEHDR] = float(prihdr[self.PC.EXPTIMEHDR])/1000.0  # Conver ms to sec for IFOSC
         return prihdr
@@ -2094,10 +2114,10 @@ class InstrumentObject(object):
         if self.Name == 'HFOSC':
             if float(shlex.split(ObjectLine)[2]) == 0:
                 Frame = 'BIAS'
-            elif 'GRISM' in shlex.split(Objline)[4].upper():
-                if 'FE-' in shlex.split(Objline)[5].upper():
+            elif 'GRISM' in shlex.split(ObjectLine)[4].upper():
+                if 'FE-' in shlex.split(ObjectLine)[5].upper():
                     Frame = 'LAMP_SPEC'
-                elif 'HALOGEN' in shlex.split(Objline)[5].upper():
+                elif 'HALOGEN' in shlex.split(ObjectLine)[5].upper():
                     Frame = 'FLAT_SPEC'
                 else:
                     Frame = 'OBJECT_SPEC'
@@ -2107,10 +2127,10 @@ class InstrumentObject(object):
         if self.Name == 'IFOSC':
             if float(shlex.split(ObjectLine)[2]) == 0:
                 Frame = 'BIAS'
-            elif 'GRISM' in shlex.split(Objline)[4].upper():
-                if 'FE-' in shlex.split(Objline)[5].upper():
+            elif 'GRISM' in shlex.split(ObjectLine)[4].upper():
+                if 'FE-' in shlex.split(ObjectLine)[5].upper():
                     Frame = 'LAMP_SPEC'
-                elif 'HALOGEN' in shlex.split(Objline)[5].upper():
+                elif 'HALOGEN' in shlex.split(ObjectLine)[5].upper():
                     Frame = 'FLAT_SPEC'
                 else:
                     Frame = 'OBJECT_SPEC'
