@@ -1797,8 +1797,8 @@ def LoadDirectories(PC,CONF=False):
     try :
         directoriesF=open(os.path.join(PC.MOTHERDIR,PC.OUTDIR,'directories'),'r')
     except IOError :
-        #Creating a text file containing the directories 
-        directories=[dirs for dirs in os.walk(PC.MOTHERDIR).next()[1] ]#if os.path.isfile(os.path.join(PC.MOTHERDIR,dirs,'SlopeimagesLog.txt'))]
+        #Creating a text file containing the directories which has fits files in it
+        directories = [dirs for dirs in os.walk(PC.MOTHERDIR).next()[1] if glob.glob(os.path.join(PC.MOTHERDIR,dirs,'*.fits'))]
         directories.sort()
         with open(os.path.join(PC.MOTHERDIR,PC.OUTDIR,'directories'),'w') as directoriesF : #Creating directories file
             directoriesF.write('\n'.join(directories)+'\n')
