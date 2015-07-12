@@ -1776,6 +1776,10 @@ def CreateLogFilesFromFits_subrout(PC,hdu=0):
 
     for night in directories:
         print("Working on night : "+night)
+        if os.path.isfile(os.path.join(PC.MOTHERDIR,night,LogFilename)):
+            print('WARNING: Log file {0} already exist.'.format(os.path.join(PC.MOTHERDIR,night,LogFilename)))
+            print('Skipping this directory now. If you want to create new log file, delete existing one or change filename NIGHTLOGFILE= in config file.')
+            continue
         os.chdir(os.path.join(PC.MOTHERDIR,night))
         listOFimgs = [f for f in os.listdir('.') if re.match(r'^.*\.fits$', f)]
         listOFimgs = sorted(listOFimgs)#, key=lambda k: int(k[:-5].split('-')[-1]))
