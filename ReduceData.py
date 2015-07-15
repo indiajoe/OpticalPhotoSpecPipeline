@@ -158,7 +158,7 @@ def SpectralPairSubtraction_subrout(PC):
                 Filtrfiledic = dict([(filtset.split()[0],shlex.split(filtset.rstrip())[1]) for filtset in FiltrFILE])  #Dictionary of filterset for each image.
 
             #Secondly we load a dictionary of raw images to their Calibration Lamp lamb file
-            with open(os.path.join(PC.MOTHERDIR,PC.OUTDIR,night,'AllObjects-ProFinalLamp.List'),'r') as LampFILE :
+            with open(os.path.join(PC.MOTHERDIR,PC.OUTDIR,night,'AllObjects-BSFinalLamp.List'),'r') as LampFILE :
                 Lampfiledic = dict([(Lampset.split()[0],shlex.split(Lampset.rstrip())[1]) for Lampset in LampFILE])  #Dictionary of Lamp file for each image.
 
             #Secondly, we load a dictionary of Dither Frame to first Raw images
@@ -1174,11 +1174,128 @@ def ImgCombineWithZeroFloating(imglistfname,outputfile,cmethod="median",czero="m
     # Now call iraf imcombine with zero scaling
     iraf.imcombine(input='@'+imglistfname, output=outputfile, combine=cmethod, reject=creject, statsec=cstatsection, zero='@'+outputfile+'_zeroshifts.txt')
     
-
-def Bias_Flat_basicCorrections_subrout(PC,method="median"):
-    """ This will combine (default=median) with avsigclip the bias for each image and also create corresponding normalized flats [,sky] and divide[,subtract] for flat [,sky] correction. """
+def Flat_basicCorrections_subrout(PC):
+    """ This will create corresponding normalized flats and divide for flat correction. Also do mask pixel masking in end."""
     iraf.imcombine.unlearn()
     iraf.imstatistics.unlearn()
+    directories = LoadDirectories(PC,CONF=False)
+
+    for night in directories:
+        PC.currentnight = night # Upgating the night directory for using GetFullPath()
+        print('Working on night: '+night)
+        
+        #Load all the names of each object image and its Bias Subtracted version
+        with open(os.path.join(PC.MOTHERDIR,PC.OUTDIR,night,'AllObjects-BSImg.List'),'r') as ObjBSImgFILE :
+            ObjBSimgdic = dict([(shlex.split(objimg)[0],shlex.split(objimg)[1]) for objimg in ObjBSImgFILE])  #Dictionary of objeckKey to BSimg
+
+        #Load all the FilterSet indexing file data
+        with open(os.path.join(PC.MOTHERDIR,PC.OUTDIR,night,'AllObjects.List'),'r') as FiltrFILE :
+            FiltrFILElist = list(FiltrFILE)
+        Filtrfiledic = dict([(shlex.split(filtset)[0],shlex.split(filtset.rstrip())[1]) for filtset in FiltrFILElist])  #Dictionary of filterset for each image.
+        Exptimefiledic = dict([(shlex.split(filtset)[0],shlex.split(filtset.rstrip())[2]) for filtset in FiltrFILElist])  #Dictionary of exptime for each image.
+        
+        MasterFlatDic = dict()
+        ObjectFlatDic = dict()
+        ObjectFinalImgDic = {}  ## To store the FINAL Image corresponding to each object frame
+
+        for objimgKey,objimg in ObjBSimgdic.items():
+            OutMasterFlat = os.path.splitext(objimg)[0]+'_flat.fits'
+            InpFlatFileList = os.path.splitext(objimgKey)[0]+'_Flat.list'
+            #Load the flatnames to create a unique flatkey for each combination of flats
+            with open(InpFlatFileList,'r') as flatlistFILE:
+                listofflats = [flatimg.rstrip() for flatimg in flatlistFILE]
+            if len(listofflats) != 0 : # Atlest one flat exist for this object
+                FlatKey = ''.join(sorted(listofflats))  # a Key to uniquely identify the flat combination.
+                try:  # symlink if the flat is already created
+                    os.symlink(PC.GetFullPath(MasterFlatDic[FlatKey]),PC.GetFullPath(OutMasterFlat))
+                except KeyError:
+                    # Create the Master Flat and add to the dictionary
+                    # First combine these Bias subtracted flats to  unnormalised flat
+                    outflatname = os.path.splitext(OutMasterFlat)[0]+'_unNorm.fits'
+                    if len(listofflats) == 1:
+                        #Nothing to combine, simply creat a simbilic link to it.
+                        os.symlink(listofflats[0],PC.GetFullPath(outflatname))
+                    else:
+                        print('Image section used for statistics of Flat is '+PC.FLATSTATSECTION)
+                        iraf.imcombine(input='@'+PC.GetFullPath(InpFlatFileList), output=PC.GetFullPath(outflatname), combine="median", scale="median",reject="sigclip", statsec=PC.FLATSTATSECTION)
+
+                    if (PC.TODO == 'S') and (PC.CONTINUUMGRADREMOVE == 'Y'):
+                        # We will normalise this continuum flat using its median smoothed version
+                        OutMasterFlat = DivideSmoothGradient(PC,PC.GetFullPath(outflatname),PC.GetFullPath(OutMasterFlat))
+                    else:
+                        #We will normalise this flat with the mode of pixels in FlatStatSection
+                        statout = iraf.imstatistics(PC.GetFullPath(outflatname)+PC.FLATSTATSECTION,fields='mode',Stdout=1)
+                        mode = float(statout[1])
+                        iraf.imarith(operand1=PC.GetFullPath(outflatname),op="/",operand2=mode,result=PC.GetFullPath(OutMasterFlat))
+                    # Add to the dictionary
+                    MasterFlatDic[FlatKey] = OutMasterFlat
+                finally:
+                    ObjectFlatDic[objimgKey] = OutMasterFlat
+            else:
+                ObjectFlatDic[objimgKey] = None
+
+
+            ###### Apply Flat correction to object frames
+            if ObjectFlatDic[objimgKey] is not None:  # Flat exists
+                print('Flat correcting '+objimg)
+                OutFCobjimg = os.path.splitext(objimg)[0]+'_FC.fits'
+                iraf.imarith(operand1=PC.GetFullPath(objimg),op="/",operand2=PC.GetFullPath(ObjectFlatDic[objimgKey]),result=PC.GetFullPath(OutFCobjimg))
+                # Update the name of output file.
+                OutFinalimg = OutFCobjimg 
+            else:
+                OutFinalimg = objimg
+                
+            ###### Now interpolate the bad pixels in the final image.
+            FixBadPixels(PC,PC.GetFullPath(OutFinalimg),night)
+            
+            #If asked to do a smooth gradient removal in image, do it after everything is over now..
+            if PC.GRADREMOVE == 'Y':
+                print('Removing smooth Gradient from '+objimg)
+                OutGSobjimg = os.path.splitext(OutFinalimg)[0]+'_GS.fits'
+                #If Filter subtraciton was sucessfull it will return the output filename, else inputname
+                OutGSobjimg = SubtractSmoothGradient(PC,PC.GetFullPath(OutFCobjimg),PC.GetFullPath(OutGSobjimg))
+                #Updating the final image name with new _GS appended 
+                OutFinalimg = os.path.basename(OutGSobjimg)
+            
+            ObjectFinalImgDic[objimgKey] = OutFinalimg
+
+
+
+        # Now write all the output files required for the next step.
+        with open(os.path.join(PC.MOTHERDIR,PC.OUTDIR,night,'AllObjects2Combine.List'),'r') as Obj2CombFILE :
+            NewFilter = 'Blah'
+            NewExptime = '-999'
+            OutObjectFinalfilename = 'AllObjects-ProcessedImg.List'
+            outObjectFinalFILE = open(os.path.join(PC.MOTHERDIR,PC.OUTDIR,night,OutObjectFinalfilename),'w')
+            for imgline in Obj2CombFILE:
+                if len(imgline.split()) == 0: #A blank line 
+                    if PC.TODO == 'S':  # If it is spectroscopy, this gap means different dither/change/exptime in grism
+                        outObjectFinalFILE.write('\n')
+                    elif PC.TODO == 'P':  # Skip only if there is a change in filter or exptime in next step
+                        pass # We will deal filter change in next step.
+                    continue
+                #Write Objectframe and the Final processed object frame
+                objimgKey = imgline.rstrip().split()[0]
+                #Make sure to enter balnk line if there is a change in filter or change in exptime
+                OldFilter = NewFilter
+                NewFilter = Filtrfiledic[objimgKey]
+                OldExptime = NewExptime
+                NewExptime = Exptimefiledic[objimgKey]
+                if (PC.TODO == 'P') and ((OldFilter != NewFilter) or (float(OldExptime) != float(NewExptime))) : 
+                    outObjectFinalFILE.write('\n')
+                # Write the output file
+                outObjectFinalFILE.write('{0}  {1}\n'.format(objimgKey,ObjectFinalImgDic[objimgKey]))
+                
+            outObjectFinalFILE.close()
+
+        if PC.IMGCOMBINE == 'Y' : print('Edit the spaces (if required) between image sets in file '+os.path.join(PC.MOTHERDIR,PC.OUTDIR,night,OutObjectFinalfilename)+' to align and combine them in next step.')
+    print('All nights over...')             
+
+
+
+def Bias_Subtraction_subrout(PC,method="median"):
+    """ This will combine (default=median) with avsigclip the bias for each image and also create corresponding file list for flats of each image. """
+    iraf.imcombine.unlearn()
     iraf.imred(_doprint=0)
     iraf.bias(_doprint=0)
     iraf.colbias.unlearn()  
@@ -1187,30 +1304,50 @@ def Bias_Flat_basicCorrections_subrout(PC,method="median"):
     iraf.zerocombine.unlearn()  
 
     directories = LoadDirectories(PC,CONF=False)
+
+    if PC.USEALLFLATS == 'Y':
+        SuperMasterFilterFlatdic = dict() # Dictionary to store all the final flats for using together form all night
+        SuperMasterFlatListsFileNamesnFiltr = dict() # Dictionary to store all the final flat list to combine and its filter
+
     for night in directories:
         PC.currentnight = night # Upgating the night directory for using GetFullPath()
         print('Working on night: '+night)
         #Load all the Bias indexing file data
         with open(os.path.join(PC.MOTHERDIR,PC.OUTDIR,night,'AllObjects-FinalBias.List'),'r') as BiasFILE :
-            Biasfiledic = dict([(biasset.split()[0],biasset.rstrip().split()[1:]) for biasset in BiasFILE])  #Dictionary of bias list for each image.
+            Biasfiledic = dict([(shlex.split(biasset)[0],biasset.rstrip().split()[1:]) for biasset in BiasFILE])  #Dictionary of bias list for each image.
         #Load all the Flat indexing file data
         with open(os.path.join(PC.MOTHERDIR,PC.OUTDIR,night,'AllObjects-FinalFlat.List'),'r') as FlatFILE :
-            Flatfiledic = dict([(flatset.split()[0],flatset.rstrip().split()[1:]) for flatset in FlatFILE])  #Dictionary of flats list for each image.
+            Flatfiledic = dict([(shlex.split(flatset)[0],flatset.rstrip().split()[1:]) for flatset in FlatFILE])  #Dictionary of flats list for each image.
         if PC.TODO == 'S':  #Load all the Lamp indexing file data
             with open(os.path.join(PC.MOTHERDIR,PC.OUTDIR,night,'AllObjects-FinalLamp.List'),'r') as LampFILE :
-                Lampfiledic = dict([(lampset.split()[0],lampset.rstrip().split()[1:]) for lampset in LampFILE])  #Dictionary of Lamps for each image.
+                Lampfiledic = dict([(shlex.split(lampset)[0],lampset.rstrip().split()[1:]) for lampset in LampFILE])  #Dictionary of Lamps for each image.
 
         if PC.SEPARATESKY == 'Y' :
             #Load all the Sky files indexing file data
             with open(os.path.join(PC.MOTHERDIR,PC.OUTDIR,night,'AllObjects-FinalSky.List'),'r') as SkyFILE :
-                Skyfiledic = dict([(skyset.split()[0],skyset.rstrip().split()[1:]) for skyset in SkyFILE])  #Dictionary of Sky list for each image.
+                Skyfiledic = dict([(shlex.split(skyset)[0],skyset.rstrip().split()[1:]) for skyset in SkyFILE])  #Dictionary of Sky list for each image.
+        if PC.USEALLFLATS == 'Y':
+            #Load all the Bias indexing file of each flat image
+            with open(os.path.join(PC.MOTHERDIR,PC.OUTDIR,night,'AllFlat-FinalBias.List'),'r') as flatBiasFILE :
+                FlatBiasfiledic = dict([(shlex.split(biasset)[0],biasset.rstrip().split()[1:]) for biasset in flatBiasFILE])  #Dictionary of bias list for each flat.
+            
 
         #Load all the FilterSet indexing file data
         with open(os.path.join(PC.MOTHERDIR,PC.OUTDIR,night,'AllObjects.List'),'r') as FiltrFILE :
             FiltrFILElist = list(FiltrFILE)
-        Filtrfiledic = dict([(filtset.split()[0],shlex.split(filtset.rstrip())[1]) for filtset in FiltrFILElist])  #Dictionary of filterset for each image.
-        Exptimefiledic = dict([(filtset.split()[0],shlex.split(filtset.rstrip())[2]) for filtset in FiltrFILElist])  #Dictionary of exptime for each image.
+        Filtrfiledic = dict([(shlex.split(filtset)[0],shlex.split(filtset.rstrip())[1]) for filtset in FiltrFILElist])  #Dictionary of filterset for each image.
+        Exptimefiledic = dict([(shlex.split(filtset)[0],shlex.split(filtset.rstrip())[2]) for filtset in FiltrFILElist])  #Dictionary of exptime for each image.
 
+        # Also the filter of all flats if we have a seperate master flat plan
+        if PC.USEALLFLATS == 'Y':
+            with open(os.path.join(PC.MOTHERDIR,PC.OUTDIR,night,'AllFilter-FinalFlat.List'),'r') as FiltrFlatFILE :
+                for filtrline in FiltrFlatFILE:
+                    filtrline = filtrline.rstrip()
+                    filtr = shlex.split(filtrline)[0]
+                    for flatimg in shlex.split(filtrline)[1:]:
+                        Filtrfiledic[flatimg] = filtr
+            
+            
         if PC.OVERSCAN != 'N': #Overscan Subtracting to be done
             print('Doing Overscan subtraction from: {0}'.format(PC.OVERSCAN))
             OSsuffix = '_OS.fits'
@@ -1218,6 +1355,7 @@ def Bias_Flat_basicCorrections_subrout(PC,method="median"):
             FlatfiledicOS = {}
             LampfiledicOS = {}
             SkyfiledicOS = {}
+            FlatBiasfiledicOS = {} # Will be used only if PC.USEALLFLATS == 'Y'
             for objimg in Biasfiledic:
                 print('DEBUG: '+objimg)
                 OSobjimg = PC.GetFullPath(os.path.splitext(objimg)[0]+OSsuffix)
@@ -1251,20 +1389,60 @@ def Bias_Flat_basicCorrections_subrout(PC,method="median"):
                         SkyfiledicOS[objimg].append(os.path.basename(outputimg))
                         if not os.path.isfile(outputimg): # If the overscan subtracted image already doesn't exist
                             iraf.colbias(input=PC.GetFullPath(skyimg),output=outputimg, bias=PC.OVERSCAN, interactive='no') # sky image
+
+            if PC.USEALLFLATS == 'Y':
+                for flatimg in FlatBiasfiledic:
+                    OSflatimg = PC.GetFullPath(os.path.splitext(flatimg)[0]+OSsuffix)
+                    if not os.path.isfile(OSflatimg): # If the overscan subtracted image already doesn't exist
+                        iraf.colbias(input=PC.GetFullPath(flatimg),output=OSflatimg, bias=PC.OVERSCAN, interactive='no') # Main object image
+                    FlatBiasfiledicOS[flatimg] = []
+                    for biasimg in FlatBiasfiledic[flatimg]:
+                        outputimg = PC.GetFullPath(os.path.splitext(biasimg)[0]+OSsuffix)
+                        FlatBiasfiledicOS[flatimg].append(os.path.basename(outputimg))
+                        if not os.path.isfile(outputimg): # If the overscan subtracted bias already doesn't exist
+                            iraf.colbias(input=PC.GetFullPath(biasimg),output=outputimg, bias=PC.OVERSCAN, interactive='no') # Bias  image
+                    
+
             # Finnaly update all the filename dictionary lists
             Biasfiledic = BiasfiledicOS 
             Flatfiledic = FlatfiledicOS 
             Lampfiledic = LampfiledicOS 
             Skyfiledic =  SkyfiledicOS 
+            FlatBiasfiledic = FlatBiasfiledicOS # Not empty Only if PC.USEALLFLATS == 'Y'
 
         MasterBiasDic = {}  # To temperorly store created master frames
         ObjectBiasDic = {}  # To store the BIAS corresponding to each object frame
         ObjectLampDic = {}  # To store the LAMP corresponding to each object frame
-        MasterFlatDic = {}  # To temperorly store created master flat              
-        ObjectFlatDic = {}  # To store the FLAT corresponding to each object frame
         MasterSkyDic = {}   # To temperorly store created sky frames             
         ObjectSkyDic = {}   # To store the SKY corresponding to each object frame
         ObjectFinalImgDic = {}  ## To store the FINAL Image corresponding to each object frame
+
+        if PC.USEALLFLATS == 'Y': # Subtract bias from all flats first
+            for flatimgKey in FlatBiasfiledic:
+                flatimg = flatimgKey if (PC.OVERSCAN == 'N') else os.path.splitext(flatimgKey)[0]+OSsuffix
+                ####### Combine Bias frames.
+                print('Combining Bias frames for '+flatimg)
+                OutMasterBias = os.path.splitext(flatimg)[0]+'_Bias.fits'
+                BiasKey = ''.join(sorted(FlatBiasfiledic[flatimgKey]))  # a Key to uniquely identify the bias combination.
+                try:  # symlink if the bias is already created
+                    os.symlink(PC.GetFullPath(MasterBiasDic[BiasKey]),PC.GetFullPath(OutMasterBias))
+                except KeyError:
+                    # Create the Master bias and add to the dictionary
+                    OutMasterBiasList = os.path.splitext(flatimg)[0]+'_Bias.list'
+                    with open(PC.GetFullPath(OutMasterBiasList),'w') as biaslistFILE:
+                        biaslistFILE.write('\n'.join([PC.GetFullPath(biasimg) for biasimg in FlatBiasfiledic[flatimgKey]])+'\n')
+                    iraf.zerocombine(input= "@"+PC.GetFullPath(OutMasterBiasList), output=PC.GetFullPath(OutMasterBias), combine="median", ccdtype="")
+                    # Add to the dictionary
+                    MasterBiasDic[BiasKey] = OutMasterBias
+                finally:
+                    # Subtract bias form this flat image
+                    BSflatimg = os.path.splitext(os.path.basename(flatimg))[0]+'_BS.fits'
+                    if not os.path.isfile(PC.GetFullPath(BSflatimg)): #If the bias subtracted flat already doesn't exist.
+                        iraf.imarith(operand1=PC.GetFullPath(flatimg),op="-",operand2=PC.GetFullPath(OutMasterBias),result=PC.GetFullPath(BSflatimg))
+                    
+                    SuperMasterFilterFlatdic.setdefault(Filtrfiledic[flatimgKey], []).append(PC.GetFullPath(BSflatimg))
+
+
         for objimgKey in Biasfiledic:
             objimg = objimgKey if (PC.OVERSCAN == 'N') else os.path.splitext(objimgKey)[0]+OSsuffix
             ####### Combine Bias frames.
@@ -1294,44 +1472,24 @@ def Bias_Flat_basicCorrections_subrout(PC,method="median"):
                 ObjectLampDic[objimgKey] = BSlampimgs[0]
 
 
-            ###### Combine Flat frames.
+            ###### Subtract Bias from Flat frames for each image
+            # Also Create the list of flat images to combine for each image
+            OutMasterFlatList = os.path.splitext(objimgKey)[0]+'_Flat.list'
+
             if Flatfiledic[objimgKey]:  # If flats exist!
-                print('Creating flat for '+objimg)
-                OutMasterFlat = os.path.splitext(objimg)[0]+'_flat.fits'
-                FlatKey = ''.join(sorted(Flatfiledic[objimgKey]))  # a Key to uniquely identify the flat combination.
-                try:  # symlink if the flat is already created
-                    os.symlink(PC.GetFullPath(MasterFlatDic[FlatKey]),PC.GetFullPath(OutMasterFlat))
-                except KeyError:
-                    # Create the Master Flat and add to the dictionary
-                    # First subtract the bias from all flat frames.
-                    BSflatimgs = [os.path.splitext(os.path.basename(flatimg))[0]+'_BS.fits'  for flatimg in Flatfiledic[objimgKey]]
-                    for flatimg,bsflatimg in zip(Flatfiledic[objimgKey],BSflatimgs):
-                        if not os.path.isfile(PC.GetFullPath(bsflatimg)): #If the bias subtracted flat already doesn't exist.
-                            iraf.imarith(operand1=PC.GetFullPath(flatimg),op="-",operand2=PC.GetFullPath(ObjectBiasDic[objimgKey]),result=PC.GetFullPath(bsflatimg))
-                    # Second combine this Bias subtracted flats to  unnormalised flat
-                    outflatname = os.path.splitext(OutMasterFlat)[0]+'_unNorm.fits'
-                    OutMasterFlatList = os.path.splitext(objimg)[0]+'_Flat.list'
+                print('Subtracting Bias from flats for '+objimg)
+                BSflatimgs = [os.path.splitext(os.path.basename(flatimg))[0]+'_BS.fits'  for flatimg in Flatfiledic[objimgKey]]
+                for flatimg,bsflatimg in zip(Flatfiledic[objimgKey],BSflatimgs):
+                    if not os.path.isfile(PC.GetFullPath(bsflatimg)): #If the bias subtracted flat already doesn't exist.
+                        iraf.imarith(operand1=PC.GetFullPath(flatimg),op="-",operand2=PC.GetFullPath(ObjectBiasDic[objimgKey]),result=PC.GetFullPath(bsflatimg))
+
+                if PC.USEALLFLATS != 'Y': # Create the list of flats to combine form this directory itself.
                     with open(PC.GetFullPath(OutMasterFlatList),'w') as flatlistFILE:
                         flatlistFILE.write('\n'.join([PC.GetFullPath(bsflatimgs) for bsflatimgs in BSflatimgs])+'\n')
-
-                    print('Image section used for statistics of Flat is '+PC.FLATSTATSECTION)
-                    iraf.imcombine(input='@'+PC.GetFullPath(OutMasterFlatList), output=PC.GetFullPath(outflatname), combine="median", scale="median",reject="sigclip", statsec=PC.FLATSTATSECTION)
-
-                    if (PC.TODO == 'S') and (self.CONTINUUMGRADREMOVE == 'Y'):
-                        # We will normalise this continuum flat using its median smoothed version
-                        OutMasterFlat = DivideSmoothGradient(PC,PC.GetFullPath(outflatname),PC.GetFullPath(OutMasterFlat))
-                    else:
-                        #We will normalise this flat with the mode of pixels in FlatStatSection
-                        statout = iraf.imstatistics(PC.GetFullPath(outflatname)+PC.FLATSTATSECTION,fields='mode',Stdout=1)
-                        mode = float(statout[1])
-                        iraf.imarith(operand1=PC.GetFullPath(outflatname),op="/",operand2=mode,result=PC.GetFullPath(OutMasterFlat))
-                    # Add to the dictionary
-                    MasterFlatDic[FlatKey] = OutMasterFlat
-                finally:
-                    ObjectFlatDic[objimgKey] = OutMasterFlat
             else:
-                print('WARNING: No Flats for doing flat correction of {0}'.format(objimg))
-                ObjectFlatDic[objimgKey] = None
+                print('ALERT: No Flats for doing flat correction of {0} from same night'.format(objimg))
+            if PC.USEALLFLATS == 'Y': # Save the name of the list to create flat from all other directories in the end of this function
+                SuperMasterFlatListsFileNamesnFiltr[PC.GetFullPath(OutMasterFlatList)] = Filtrfiledic[objimgKey]
 
             ####### Bias/Sky subtract object frame
             BiasRemovedObjimg = os.path.splitext(objimg)[0]+'_BS.fits'
@@ -1360,55 +1518,19 @@ def Bias_Flat_basicCorrections_subrout(PC,method="median"):
                 print('Subtracting Bias from '+objimg)
                 iraf.imarith(operand1=PC.GetFullPath(objimg),op="-",operand2=PC.GetFullPath(ObjectBiasDic[objimgKey]),result=PC.GetFullPath(BiasRemovedObjimg))
 
-            ###### Apply Flat correction to only object frames
-            if ObjectFlatDic[objimgKey] is not None:  # Flat exists
-                print('Flat correcting '+objimg)
-                OutFCobjimg = os.path.splitext(BiasRemovedObjimg)[0]+'_FC.fits'
-                iraf.imarith(operand1=PC.GetFullPath(BiasRemovedObjimg),op="/",operand2=PC.GetFullPath(ObjectFlatDic[objimgKey]),result=PC.GetFullPath(OutFCobjimg))
-                # Update the name of output file.
-                OutFinalimg = OutFCobjimg 
-            else:
-                OutFinalimg = BiasRemovedObjimg
-                
-            ###### Now interpolate the bad pixels in the final image.
-            FixBadPixels(PC,PC.GetFullPath(OutFinalimg),night)
-            
-            #If asked to do a smooth gradient removal in image, do it after everything is over now..
-            if PC.GRADREMOVE == 'Y':
-                print('Removing smooth Gradint from '+objimg)
-                OutGSobjimg = os.path.splitext(OutFinalimg)[0]+'_GS.fits'
-                #If Filter subtraciton was sucessfull it will return the output filename, else inputname
-                OutGSobjimg = SubtractSmoothGradient(PC,PC.GetFullPath(OutFCobjimg),PC.GetFullPath(OutGSobjimg))
-                #Updating the final image name with new _GS appended 
-                OutFinalimg = os.path.basename(OutGSobjimg)
-            
-            ObjectFinalImgDic[objimgKey] = OutFinalimg
+            ObjectFinalImgDic[objimgKey] = BiasRemovedObjimg
 
         # Now write all the output files required for the next step.
         with open(os.path.join(PC.MOTHERDIR,PC.OUTDIR,night,'AllObjects2Combine.List'),'r') as Obj2CombFILE :
-            NewFilter = 'Blah'
-            NewExptime = '-999'
-            OutObjectFinalfilename = 'AllObjects-ProcessedImg.List'
+            OutObjectFinalfilename = 'AllObjects-BSImg.List'
             outObjectFinalFILE = open(os.path.join(PC.MOTHERDIR,PC.OUTDIR,night,OutObjectFinalfilename),'w')
             if PC.TODO == 'S':
-                outObjectLampFILE = open(os.path.join(PC.MOTHERDIR,PC.OUTDIR,night,'AllObjects-ProFinalLamp.List'),'w')
+                outObjectLampFILE = open(os.path.join(PC.MOTHERDIR,PC.OUTDIR,night,'AllObjects-BSFinalLamp.List'),'w')
             for imgline in Obj2CombFILE:
                 if len(imgline.split()) == 0: #A blank line 
-                    if PC.TODO == 'S':  # If it is spectroscopy, this gap means different dither/change/exptime in grism
-                        outObjectFinalFILE.write('\n')
-                    elif PC.TODO == 'P':  # Skip only if there is a change in filter or exptime in next step
-                        pass # We will deal filter change in next step.
                     continue
                 #Write Objectframe and the Final processed object frame
                 objimgKey = imgline.rstrip().split()[0]
-                #Make sure to enter balnk line if there is a change in filter or change in exptime
-                OldFilter = NewFilter
-                NewFilter = Filtrfiledic[objimgKey]
-                OldExptime = NewExptime
-                NewExptime = Exptimefiledic[objimgKey]
-                if (PC.TODO == 'P') and ((OldFilter != NewFilter) or (float(OldExptime) != float(NewExptime))) : 
-                    outObjectFinalFILE.write('\n')
-                # Write the output file
                 outObjectFinalFILE.write('{0}  {1}\n'.format(objimgKey,ObjectFinalImgDic[objimgKey]))
                 if PC.TODO == 'S': # Also create the log of image and its new Lamp
                     outObjectLampFILE.write('{0}  {1}\n'.format(objimgKey,ObjectLampDic[objimgKey]))
@@ -1416,7 +1538,12 @@ def Bias_Flat_basicCorrections_subrout(PC,method="median"):
             outObjectFinalFILE.close()
             if PC.TODO == 'S': outObjectLampFILE.close()
 
-        if PC.IMGCOMBINE == 'Y' : print('Edit the spaces (if required) between image sets in file '+os.path.join(PC.MOTHERDIR,PC.OUTDIR,night,OutObjectFinalfilename)+' to align and combine them in next step.')
+    ### Now write the Flats to cobine list if we are using SuperMasterFlat
+    if PC.USEALLFLATS == 'Y':
+        for flatslistfilename,filtr in SuperMasterFlatListsFileNamesnFiltr.items():
+            with open(flatslistfilename,'w') as flatlistFILE:
+                flatlistFILE.write('\n'.join(SuperMasterFilterFlatdic[filtr]))
+
     print('All nights over...')             
                 
 
@@ -1425,6 +1552,9 @@ def Manual_InspectCalframes_subrout(PC):
     directories = LoadDirectories(PC,CONF=True)
     filelist = ['AllObjects-Bias.List','AllObjects-Flat.List']
     outfilelist = ['AllObjects-FinalBias.List','AllObjects-FinalFlat.List']
+    if PC.USEALLFLATS == 'Y':
+        filelist += ['AllFilter-Flat.List', 'AllFlat-Bias.List']
+        outfilelist +=['AllFilter-FinalFlat.List', 'AllFlat-FinalBias.List']
     if PC.TODO == 'S' :
         filelist.append('AllObjects-Lamp.List')
         outfilelist.append('AllObjects-FinalLamp.List')
@@ -1436,26 +1566,26 @@ def Manual_InspectCalframes_subrout(PC):
     AcceptAllEveryNight = False
     for night in directories:
         print("Working on night :\033[91m {0} \033[0m ".format(night))
+        AlwaysRemove = []
+        AlwaysAccept = []
         for inpfile,outfile in zip(filelist,outfilelist):
             print('-*-'*8)
             print('Files in: \033[91m {0} \033[0m'.format(os.path.join(PC.MOTHERDIR,PC.OUTDIR,night,inpfile)))
             print('-*-'*8)
             inFILE = open(os.path.join(PC.MOTHERDIR,PC.OUTDIR,night,inpfile),'r')
             ouFILE = open(os.path.join(PC.MOTHERDIR,PC.OUTDIR,night,outfile),'w')
-            AlwaysRemove = []
-            AlwaysAccept = []
+            print('-'*5)
+            print('To skip all the remaining verifications, you can enter following two options')
+            print('acceptall       # Accept all remaining images in this night')
+            print('acceptallnights # Accept all images in all remaining nights')
+            print('Use the above two options only when you are sure all the images are good. Do not use them if you are not sure.')
+            print('-'*5)
             for inpline in inFILE:
-                inplinelist = inpline.rstrip().split()
+                inplinelist = shlex.split(inpline.rstrip())
                 if len(inplinelist) > 1 : ScienceImg = inplinelist[0]
                 else : continue   #Skipping to next line
                 CalImgs = [imgs for imgs in inplinelist[1:] if imgs not in AlwaysRemove]
                 FinalCalImgs = CalImgs[:]
-                print('-'*5)
-                print('To skip all the remaining verifications, you can enter following two options')
-                print('acceptall       # Accept all remaining images in this night')
-                print('acceptallnights # Accept all images in all remaining nights')
-                print('Use the above two options only when you are sure all the images are good. Do not use them if you are not sure.')
-                print('-'*5)
                 print('For the science image: '+ScienceImg)
                 if not AcceptAllThisNight :
                     for img in CalImgs:
@@ -1485,7 +1615,7 @@ def Manual_InspectCalframes_subrout(PC):
                                 break
                 if not FinalCalImgs : print('\033[91m ALERT: \033[0m No Calibration Images for {0} {1}'.format(night,ScienceImg))
                 #Writing the final surviving calibration files to output file
-                ouFILE.write(' '.join([ScienceImg]+FinalCalImgs)+'\n')
+                ouFILE.write('"{0}" {1}\n'.format(ScienceImg,' '.join(FinalCalImgs)))
             ouFILE.close()
             inFILE.close()
         if not AcceptAllEveryNight : AcceptAllThisNight = False
@@ -1613,9 +1743,9 @@ def SelectionofFrames_subrout(PC):
 
         with open(os.path.join(night,LogFilename),'r') as imglogFILE :
             # Skip blank lines and Commented out lines with #
-            imglogFILElines = [imageLINE for imageLINE in imglogFILE if ((imageLINE.strip() is not '') and (imageLINE[0] !='#'))]
+            imglogFILElines = [imageLINE.rstrip() for imageLINE in imglogFILE if ((imageLINE.strip() is not '') and (imageLINE[0] !='#'))]
 
-        ObjListT = [imgline.rstrip() for imgline in imglogFILElines if regexpObj.search(' '.join(shlex.split(imgline)[0:2])) is not None ] # Search both Filename and OBJECT Name
+        ObjListT = [imgline for imgline in imglogFILElines if regexpObj.search(' '.join(shlex.split(imgline)[0:2])) is not None ] # Search both Filename and OBJECT Name
         ObjList = []
         # Remove any obvious non Object files which creeps in through regexp
         for Objline in ObjListT:
@@ -1635,7 +1765,17 @@ def SelectionofFrames_subrout(PC):
                 FiltList.add(FiltOrGrism)
                 ObjFILE.write('{0}   "{1}"  {2}  {3} {4}\n'.format(Name,FiltOrGrism,Exptime,Date,Time))
 
-        if not FiltList : #No files in this directory
+        # Create a complete list of filters is we need to use flats from all nights
+        CompleteFiltList = set()
+        if PC.USEALLFLATS == 'Y':
+            for imgline in imglogFILElines:
+                ImgFrame = Instrument.IdentifyFrame(imgline)
+                if ImgFrame in ['BIAS','LAMP_SPEC']:  # Skip Bobvious Bias, Wavelength Calibration Lamps etc
+                    continue    #Skip these and go to the next object.
+                CompleteFiltList.add(shlex.split(imgline)[FiltColumn])
+            
+
+        if (not FiltList) or (not CompleteFiltList)  : #No files in this directory
             print('\033[91m ALERT: \033[0m No Images to reduce found in directory : {0}'.format(night))
             print('Please remove {0} from directory list next time.'.format(night))
             continue
@@ -1649,8 +1789,9 @@ def SelectionofFrames_subrout(PC):
 
         #Now ask for flats in each filters
         Flatlistdic = dict()
+        Flatsizedic = dict()
         print("Below in addition to regexp, if needed you can enter the starting and ending filenumbers separated by space also.")
-        for filt in FiltList:
+        for filt in FiltList|CompleteFiltList:
             filenumbregexp=re.compile(r'.*')
             if filt not in FiltREdic.keys() : 
                 if PC.TODO=='P': FiltREdic[filt] = '.*[Ff]lat.*'  #Setting default to *[Ff]lat*
@@ -1673,6 +1814,7 @@ def SelectionofFrames_subrout(PC):
                     if filt == shlex.split(imgline)[FiltColumn]: # Matching filter
                         if filenumbregexp.search(imgline.split()[-1]): # Last column is filenumber
                             FlatList.append(imgline.split()[0])
+                            Flatsizedic[imgline.split()[0]] = tuple(shlex.split(imgline)[-3:-1])  # X, Y size of each flat
             Flatlistdic[filt] = FlatList  #Saving flat list for this filter set
 
         #Now if Separate sky is being used to subtract, ask for each filter
@@ -1747,6 +1889,18 @@ def SelectionofFrames_subrout(PC):
             if PC.SEPARATESKY=='Y': ObjSkyFILE.write(Name+'  '+' '.join(Skylistdic[FiltOrGrism])+'\n')
         ObjFlatFILE.close()
         ObjBiasFILE.close()
+        # Create the files for all flat files
+        if PC.USEALLFLATS == 'Y':
+            FiltrFlatFILE = open(os.path.join(PC.MOTHERDIR,PC.OUTDIR,night,'AllFilter-Flat.List'),'w')
+            FlatBiasFILE = open(os.path.join(PC.MOTHERDIR,PC.OUTDIR,night,'AllFlat-Bias.List'),'w')
+            for filt in FiltList|CompleteFiltList:
+                FiltrFlatFILE.write('"{0}" {1}\n'.format(filt,' '.join(Flatlistdic[filt])))
+                for flatimg in Flatlistdic[filt]:
+                    ImgSizeX, ImgSizeY = Flatsizedic[flatimg]
+                    FlatBiasFILE.write('{0} {1}\n'.format(flatimg,' '.join(BiasSizeDic[(ImgSizeX, ImgSizeY)])))
+            FiltrFlatFILE.close()
+            FlatBiasFILE.close()
+            
         print('Edit, save (if required) and close the Flat,Bias/Lamp/Sky list associations for this night :'+night)
         raw_input("Press Enter to continue...")
         subprocess.call(PC.TEXTEDITOR.split()+[os.path.join(PC.MOTHERDIR,PC.OUTDIR,night,'AllObjects-Flat.List')])
@@ -1941,6 +2095,8 @@ class PipelineConfig(object):
                         self.IMGCOMBMETHOD = con.split()[1]
                     elif con.split()[0] == "FLATSTATSECTION=" :
                         self.FLATSTATSECTION = con.split()[1]
+                    elif con.split()[0] == "USEALLFLATS=" :
+                        self.USEALLFLATS = con.split()[1][0].upper()
 
                     elif con.split()[0] == "SEPARATE_SKY=" :
                         self.SEPARATESKY = con.split()[1][0].upper()
@@ -2090,13 +2246,13 @@ class InstrumentObject(object):
         """ Returns the list of steps to run based onPC, the PipelineConfiguration object """
         StepsToRun = []
         if self.Name in ['HFOSC','IFOSC']:
-            StepsToRun += [0, 1, 2, 3, 4]
+            StepsToRun += [0, 1, 2, 3, 4, 5]
             if self.PC.IMGCOMBINE == 'Y':
-                StepsToRun += [ 5 ]
+                StepsToRun += [ 6 ]
             if self.PC.TODO == 'P':
-                StepsToRun += [6, 7, 8, 9]
+                StepsToRun += [7, 8, 9, 10]
             elif self.PC.TODO == 'S':
-                StepsToRun += [10, 11]
+                StepsToRun += [11, 12]
         else:
             print('Unknown Instrument')
 
@@ -2174,29 +2330,32 @@ InstrumentDictionaries = {'HFOSC':{
         3 : {'Menu': 'Visually inspect and/or reject Bias/Flats/Sky/Lamps one by one.',
              'RunMessage': "RUNNING TASK:3  Visual inspection and/or rejection of Bias/Flats/Sky/Lamps frames..",
              'function': Manual_InspectCalframes_subrout},
-        4 : {'Menu': 'Subtract Overscan,Bias/sky/grad, Apply Flat Correction and/or Bad pixel interpolation',
-             'RunMessage': "RUNNING TASK:4  Subtracting biases and Flat correction etc..",
-             'function': Bias_Flat_basicCorrections_subrout },
-        5 : {'Menu': 'Align and combine images.',
-             'RunMessage': "RUNNING TASK:5  Aligning and combining images..",
+        4 : {'Menu': 'Subtract Overscan,Bias/sky',
+             'RunMessage': "RUNNING TASK:4  Subtracting biases or sky..",
+             'function': Bias_Subtraction_subrout},
+        5 : {'Menu': 'Apply Flat Correction and/or Bad pixel interpolation',
+             'RunMessage': "RUNNING TASK:5  Flat correction etc..",
+             'function': Flat_basicCorrections_subrout},
+        6 : {'Menu': 'Align and combine images.',
+             'RunMessage': "RUNNING TASK:6  Aligning and combining images..",
              'function': AlignNcombine_subrout },
-        6 : {'Menu': 'Make the list of images, Images4Photo.in to do Photometry.',
-             'RunMessage': "RUNNING TASK:6  Makeing list of images, Images4Photo.in to do Photometry..",
+        7 : {'Menu': 'Make the list of images, Images4Photo.in to do Photometry.',
+             'RunMessage': "RUNNING TASK:7  Makeing list of images, Images4Photo.in to do Photometry..",
              'function': Createlist_subrout },
-        7 : {'Menu': 'Select Stars and Sky region of the field on first image',
-             'RunMessage': "RUNNING TASK:7  Selecting Stars and Sky region of the field from first image..",
+        8 : {'Menu': 'Select Stars and Sky region of the field on first image',
+             'RunMessage': "RUNNING TASK:8  Selecting Stars and Sky region of the field from first image..",
              'function': Star_sky_subrout },
-        8 : {'Menu': 'Create Sextracter config file & coordinate output of first image.',
-             'RunMessage': "RUNNING TASK:8  Create Sextracter config file & coordinate output of first image..",
+        9 : {'Menu': 'Create Sextracter config file & coordinate output of first image.',
+             'RunMessage': "RUNNING TASK:9  Create Sextracter config file & coordinate output of first image..",
              'function': Sextractor_subrout },
-        9 : {'Menu': 'Do Photometry',
-             'RunMessage': "RUNNING TASK:9 Doing Photometry..",
+        10 : {'Menu': 'Do Photometry',
+             'RunMessage': "RUNNING TASK:10 Doing Photometry..",
              'function': Photometry },
-        10: {'Menu': 'Input Spectrum pair subtraction and filenames.',
-             'RunMessage': "RUNNING TASK:10  Inputing Spectrum pair subtraction and filenames...",
+        11: {'Menu': 'Input Spectrum pair subtraction and filenames.',
+             'RunMessage': "RUNNING TASK:11  Inputing Spectrum pair subtraction and filenames...",
              'function': SpectralPairSubtraction_subrout },
-        11: {'Menu': 'Extract wavelength calibrated 1D spectra from image.',
-             'RunMessage': "RUNNING TASK:11  Extracting wavelength calibrated 1D spectra..",
+        12: {'Menu': 'Extract wavelength calibrated 1D spectra from image.',
+             'RunMessage': "RUNNING TASK:12  Extracting wavelength calibrated 1D spectra..",
              'function': SpectralExtraction_subrout }
     }
 },
@@ -2228,29 +2387,32 @@ InstrumentDictionaries = {'HFOSC':{
         3 : {'Menu': 'Visually inspect and/or reject Bias/Flats/Sky/Lamps one by one.',
              'RunMessage': "RUNNING TASK:3  Visual inspection and/or rejection of Bias/Flats/Sky/Lamps frames..",
              'function': Manual_InspectCalframes_subrout},
-        4 : {'Menu': 'Subtract Bias/sky/grad, Apply Flat Correction and/or Bad pixel interpolation',
-             'RunMessage': "RUNNING TASK:4  Subtracting biases and Flat correction and/or I fringe subtraction etc..",
-             'function': Bias_Flat_basicCorrections_subrout },
-        5 : {'Menu': 'Align and combine images.',
-             'RunMessage': "RUNNING TASK:5  Aligning and combining images..",
+        4 : {'Menu': 'Subtract Overscan,Bias/sky',
+             'RunMessage': "RUNNING TASK:4  Subtracting biases and/or I fringe subtraction etc..",
+             'function': Bias_Subtraction_subrout},
+        5 : {'Menu': 'Apply Flat Correction and/or Bad pixel interpolation',
+             'RunMessage': "RUNNING TASK:5  Flat correction etc..",
+             'function': Flat_basicCorrections_subrout},
+        6 : {'Menu': 'Align and combine images.',
+             'RunMessage': "RUNNING TASK:6  Aligning and combining images..",
              'function': AlignNcombine_subrout },
-        6 : {'Menu': 'Make the list of images, Images4Photo.in to do Photometry.',
-             'RunMessage': "RUNNING TASK:6  Makeing list of images, Images4Photo.in to do Photometry..",
+        7 : {'Menu': 'Make the list of images, Images4Photo.in to do Photometry.',
+             'RunMessage': "RUNNING TASK:7  Makeing list of images, Images4Photo.in to do Photometry..",
              'function': Createlist_subrout },
-        7 : {'Menu': 'Select Stars and Sky region of the field on first image',
-             'RunMessage': "RUNNING TASK:7  Selecting Stars and Sky region of the field from first image..",
+        8 : {'Menu': 'Select Stars and Sky region of the field on first image',
+             'RunMessage': "RUNNING TASK:8  Selecting Stars and Sky region of the field from first image..",
              'function': Star_sky_subrout },
-        8 : {'Menu': 'Create Sextracter config file & coordinate output of first image.',
-             'RunMessage': "RUNNING TASK:8  Create Sextracter config file & coordinate output of first image..",
+        9 : {'Menu': 'Create Sextracter config file & coordinate output of first image.',
+             'RunMessage': "RUNNING TASK:9  Create Sextracter config file & coordinate output of first image..",
              'function': Sextractor_subrout },
-        9 : {'Menu': 'Do Photometry',
-             'RunMessage': "RUNNING TASK:9 Doing Photometry..",
+        10 : {'Menu': 'Do Photometry',
+             'RunMessage': "RUNNING TASK:10 Doing Photometry..",
              'function': Photometry },
-        10: {'Menu': 'Input Spectrum pair subtraction and filenames.',
-             'RunMessage': "RUNNING TASK:10  Inputing Spectrum pair subtraction and filenames...",
+        11: {'Menu': 'Input Spectrum pair subtraction and filenames.',
+             'RunMessage': "RUNNING TASK:11  Inputing Spectrum pair subtraction and filenames...",
              'function': SpectralPairSubtraction_subrout },
-        11: {'Menu': 'Extract wavelength calibrated 1D spectra from image.',
-             'RunMessage': "RUNNING TASK:11  Extracting wavelength calibrated 1D spectra..",
+        12: {'Menu': 'Extract wavelength calibrated 1D spectra from image.',
+             'RunMessage': "RUNNING TASK:12  Extracting wavelength calibrated 1D spectra..",
              'function': SpectralExtraction_subrout }
     }
 }
