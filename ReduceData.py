@@ -1202,7 +1202,7 @@ def Flat_basicCorrections_subrout(PC):
             OutMasterFlat = os.path.splitext(objimg)[0]+'_flat.fits'
             InpFlatFileList = os.path.splitext(objimgKey)[0]+'_Flat.list'
             #Load the flatnames to create a unique flatkey for each combination of flats
-            with open(InpFlatFileList,'r') as flatlistFILE:
+            with open(PC.GetFullPath(InpFlatFileList),'r') as flatlistFILE:
                 listofflats = [flatimg.rstrip() for flatimg in flatlistFILE]
             if len(listofflats) != 0 : # Atlest one flat exist for this object
                 FlatKey = ''.join(sorted(listofflats))  # a Key to uniquely identify the flat combination.
@@ -1368,7 +1368,7 @@ def Bias_Subtraction_subrout(PC,method="median"):
                         iraf.colbias(input=PC.GetFullPath(biasimg),output=outputimg, bias=PC.OVERSCAN, interactive='no') # Bias  image
                 FlatfiledicOS[objimg] = []
                 for flatimg in Flatfiledic[objimg]:
-                    # In case of flat people can give adjecent night's filename, so take only basename for outputimg
+                    # no need to specifically ask it to take only basename for outputimg 
                     outputimg = PC.GetFullPath(os.path.splitext(os.path.basename(flatimg))[0]+OSsuffix) 
                     FlatfiledicOS[objimg].append(os.path.basename(outputimg))
                     if not os.path.isfile(outputimg): # If the overscan subtracted image already doesn't exist
@@ -1542,7 +1542,7 @@ def Bias_Subtraction_subrout(PC,method="median"):
     if PC.USEALLFLATS == 'Y':
         for flatslistfilename,filtr in SuperMasterFlatListsFileNamesnFiltr.items():
             with open(flatslistfilename,'w') as flatlistFILE:
-                flatlistFILE.write('\n'.join(SuperMasterFilterFlatdic[filtr]))
+                flatlistFILE.write('\n'.join(SuperMasterFilterFlatdic[filtr])+'\n')
 
     print('All nights over...')             
                 
@@ -1582,7 +1582,7 @@ def Manual_InspectCalframes_subrout(PC):
             print('-'*5)
             for inpline in inFILE:
                 inplinelist = shlex.split(inpline.rstrip())
-                if len(inplinelist) > 1 : ScienceImg = inplinelist[0]
+                if len(inplinelist) > 0 : ScienceImg = inplinelist[0]
                 else : continue   #Skipping to next line
                 CalImgs = [imgs for imgs in inplinelist[1:] if imgs not in AlwaysRemove]
                 FinalCalImgs = CalImgs[:]
@@ -1775,7 +1775,7 @@ def SelectionofFrames_subrout(PC):
                 CompleteFiltList.add(shlex.split(imgline)[FiltColumn])
             
 
-        if (not FiltList) or (not CompleteFiltList)  : #No files in this directory
+        if (not FiltList) and (not CompleteFiltList)  : #No files in this directory
             print('\033[91m ALERT: \033[0m No Images to reduce found in directory : {0}'.format(night))
             print('Please remove {0} from directory list next time.'.format(night))
             continue
