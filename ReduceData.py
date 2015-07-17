@@ -2285,10 +2285,10 @@ class InstrumentObject(object):
                 Frame = 'OBJECT_IMG'
             
         if self.Name == 'IFOSC':
-            if float(shlex.split(ObjectLine)[2]) == 0:
+            if float(shlex.split(ObjectLine)[2]) < 0.5:
                 Frame = 'BIAS'
-            elif 'GRISM' in shlex.split(ObjectLine)[4].upper():
-                if 'FE-' in shlex.split(ObjectLine)[5].upper():
+            elif 'IFOSC' in shlex.split(ObjectLine)[4].upper():
+                if 'NEON' in shlex.split(ObjectLine)[5].upper():
                     Frame = 'LAMP_SPEC'
                 elif 'HALOGEN' in shlex.split(ObjectLine)[5].upper():
                     Frame = 'FLAT_SPEC'
