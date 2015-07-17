@@ -1,0 +1,17 @@
+# Some tips you might find useful for the pipeline
+==================================================
+
+# For HCT HFOSC
+===============
+# To rename all the files without .fits extention to .fits
+find . ! -iname '*.fits' -iname '[wxyz]*' -exec mv {} {}.fits \;
+
+
+# For IGO IFOSC
+==============
+# To uncompress all the .gz files
+find . -iname '*.gz' -exec gunzip -d {} \;
+
+# To comment out all the Focus or Test images from the ObsLogofImages.txt file
+find . -name ObsLogofImages.txt -exec sed -i 's/^\([Tt]est\)/#\1/' {} \;
+find . -name ObsLogofImages.txt -exec sed -i 's/^\([Ff]ocus\)/#\1/' {} \;
