@@ -1327,7 +1327,7 @@ def Bias_Subtraction_subrout(PC,method="median"):
             with open(os.path.join(PC.MOTHERDIR,PC.OUTDIR,night,'AllObjects-FinalSky.List'),'r') as SkyFILE :
                 Skyfiledic = dict([(shlex.split(skyset)[0],skyset.rstrip().split()[1:]) for skyset in SkyFILE])  #Dictionary of Sky list for each image.
         if PC.USEALLFLATS == 'Y':
-            #Load all the Bias indexing file of each flat image
+            #Load all the Bias indexing file of each flat image  # IMP Note: This file containes even flats which were rejected. So not all lines are useful
             with open(os.path.join(PC.MOTHERDIR,PC.OUTDIR,night,'AllFlat-FinalBias.List'),'r') as flatBiasFILE :
                 FlatBiasfiledic = dict([(shlex.split(biasset)[0],biasset.rstrip().split()[1:]) for biasset in flatBiasFILE])  #Dictionary of bias list for each flat.
             
@@ -1340,13 +1340,14 @@ def Bias_Subtraction_subrout(PC,method="median"):
 
         # Also the filter of all flats if we have a seperate master flat plan
         if PC.USEALLFLATS == 'Y':
+            AllFlatsList = [] # Also create a list of all final good flats of this night.
             with open(os.path.join(PC.MOTHERDIR,PC.OUTDIR,night,'AllFilter-FinalFlat.List'),'r') as FiltrFlatFILE :
                 for filtrline in FiltrFlatFILE:
                     filtrline = filtrline.rstrip()
                     filtr = shlex.split(filtrline)[0]
                     for flatimg in shlex.split(filtrline)[1:]:
                         Filtrfiledic[flatimg] = filtr
-            
+                        AllFlatsList.append(flatimg)
             
         if PC.OVERSCAN != 'N': #Overscan Subtracting to be done
             print('Doing Overscan subtraction from: {0}'.format(PC.OVERSCAN))
@@ -1391,7 +1392,7 @@ def Bias_Subtraction_subrout(PC,method="median"):
                             iraf.colbias(input=PC.GetFullPath(skyimg),output=outputimg, bias=PC.OVERSCAN, interactive='no') # sky image
 
             if PC.USEALLFLATS == 'Y':
-                for flatimg in FlatBiasfiledic:
+                for flatimg in AllFlatsList:
                     OSflatimg = PC.GetFullPath(os.path.splitext(flatimg)[0]+OSsuffix)
                     if not os.path.isfile(OSflatimg): # If the overscan subtracted image already doesn't exist
                         iraf.colbias(input=PC.GetFullPath(flatimg),output=OSflatimg, bias=PC.OVERSCAN, interactive='no') # Main object image
@@ -1410,6 +1411,7 @@ def Bias_Subtraction_subrout(PC,method="median"):
             Skyfiledic =  SkyfiledicOS 
             FlatBiasfiledic = FlatBiasfiledicOS # Not empty Only if PC.USEALLFLATS == 'Y'
 
+
         MasterBiasDic = {}  # To temperorly store created master frames
         ObjectBiasDic = {}  # To store the BIAS corresponding to each object frame
         ObjectLampDic = {}  # To store the LAMP corresponding to each object frame
@@ -1417,8 +1419,8 @@ def Bias_Subtraction_subrout(PC,method="median"):
         ObjectSkyDic = {}   # To store the SKY corresponding to each object frame
         ObjectFinalImgDic = {}  ## To store the FINAL Image corresponding to each object frame
 
-        if PC.USEALLFLATS == 'Y': # Subtract bias from all flats first
-            for flatimgKey in FlatBiasfiledic:
+        if PC.USEALLFLATS == 'Y': # Subtract bias from all flats which survived selection first
+            for flatimgKey in AllFlatsList:
                 flatimg = flatimgKey if (PC.OVERSCAN == 'N') else os.path.splitext(flatimgKey)[0]+OSsuffix
                 ####### Combine Bias frames.
                 print('Combining Bias frames for '+flatimg)
