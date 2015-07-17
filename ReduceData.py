@@ -1884,7 +1884,14 @@ def SelectionofFrames_subrout(PC):
             FiltOrGrism = shlex.split(Objline)[FiltColumn]
             ObjFlatFILE.write(Name+'  '+' '.join(Flatlistdic[FiltOrGrism])+'\n')
             ImgSizeX, ImgSizeY = tuple(shlex.split(Objline)[-3:-1])
-            ObjBiasFILE.write(Name+'  '+' '.join(BiasSizeDic[(ImgSizeX, ImgSizeY)])+'\n')
+            try:
+                ObjBiasFILE.write(Name+'  '+' '.join(BiasSizeDic[(ImgSizeX, ImgSizeY)])+'\n')
+            except KeyError:
+                print('\033[91m ERROR \033[0m: No Bias found for object img {0} with size {1},{2}'.format(Name,ImgSizeX, ImgSizeY))
+                if PC.SEPARATESKY=='Y':  print('Since you are subtracting seperate sky, I am ignoring this..')
+                else: print('Find bias for this night, copy here and rerun pipeline for this directory.')
+                ObjBiasFILE.write(Name+' \n')
+                
             if PC.TODO=='S' :ObjLampFILE.write(Name+'  '+' '.join(Lamplistdic[FiltOrGrism])+'\n')
             if PC.SEPARATESKY=='Y': ObjSkyFILE.write(Name+'  '+' '.join(Skylistdic[FiltOrGrism])+'\n')
         ObjFlatFILE.close()
@@ -1897,7 +1904,13 @@ def SelectionofFrames_subrout(PC):
                 FiltrFlatFILE.write('"{0}" {1}\n'.format(filt,' '.join(Flatlistdic[filt])))
                 for flatimg in Flatlistdic[filt]:
                     ImgSizeX, ImgSizeY = Flatsizedic[flatimg]
-                    FlatBiasFILE.write('{0} {1}\n'.format(flatimg,' '.join(BiasSizeDic[(ImgSizeX, ImgSizeY)])))
+                    try:
+                        FlatBiasFILE.write('{0} {1}\n'.format(flatimg,' '.join(BiasSizeDic[(ImgSizeX, ImgSizeY)])))
+                    except KeyError:
+                        print('\033[91m ERROR \033[0m: No Bias found for flat img {0} with size {1},{2}'.format(flatimg,ImgSizeX, ImgSizeY))
+                        print('Flat without bias subtraction is useless, and also harmful to other good flats of the night.')
+                        print('Find bias for this night, copy here and rerun pipeline. (or remove this flat!)')
+                        raise
             FiltrFlatFILE.close()
             FlatBiasFILE.close()
             
