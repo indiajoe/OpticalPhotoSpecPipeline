@@ -8,9 +8,11 @@ Currently, this pipeline supports following instruments
 + HFOSC @HCT, India : (Both Imaging and Spectroscopy data)
 + IFOSC @IGO, India : (Both Imaging and Spectroscopy data)
 
-The pipeline's user interface is very similar to [TIRSPEC](http://indiajoe.github.io/TIRSPEC/) (NIR instrument @HCT)
 
-Hence, for detailed instruction on how to install and run the pipeline, see its wiki page : https://github.com/indiajoe/TIRSPEC/wiki
+Main Documentation : https://github.com/indiajoe/OpticalPhotoSpecPipeline/wiki
+
+The pipeline's user interface is very similar to [TIRSPEC](http://indiajoe.github.io/TIRSPEC/) (NIR instrument @HCT)
+Hence, for some detailed instruction on how to run the pipeline, see its wiki page also : https://github.com/indiajoe/TIRSPEC/wiki
 
 Feedbacks in the form of suggestions and pull requests are more than welcome.
 
