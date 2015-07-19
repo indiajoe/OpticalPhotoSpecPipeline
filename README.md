@@ -5,11 +5,12 @@ This is a comprehensive data reduction pipeline for optical instruments.
 Aim of this pipeline is to provide users a single pipeline interface for reducing multiple instrument data.
 
 Currently, this pipeline supports following instruments
-+ HFOSC @HCT, India : (Both Imaging and Spectroscopy data)
-+ IFOSC @IGO, India : (Both Imaging and Spectroscopy data)
++ [HFOSC](http://www.iiap.res.in/iao/hfosc.html) @HCT, India : (Both Imaging and Spectroscopy data)
++ [IFOSC](http://www.iucaa.ernet.in/~itp/igoweb/igo_tele_and_inst_ifosc.htm) @IGO, India : (Both Imaging and Spectroscopy data)
 
 
 Main Documentation : https://github.com/indiajoe/OpticalPhotoSpecPipeline/wiki
+Webpage: http://indiajoe.github.io/OpticalPhotoSpecPipeline
 
 The pipeline's user interface is very similar to [TIRSPEC](http://indiajoe.github.io/TIRSPEC/) (NIR instrument @HCT)
 Hence, for some detailed instruction on how to run the pipeline, see its wiki page also : https://github.com/indiajoe/TIRSPEC/wiki
