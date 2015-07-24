@@ -85,7 +85,7 @@ def SpectralExtraction_subrout(PC):
         Img2Filt = []
         AllImglist = []
         for line in SpecslistFILE:
-            line = line.rstrip().split()
+            line = shlex.split(line.rstrip())
             Img2Lamp.append((line[0],line[1]))
             Img2Filt.append((line[0],line[2]))
             AllImglist.append(line[0])
@@ -116,9 +116,10 @@ def SpectralExtraction_subrout(PC):
             # Running apall
             iraf.apall(input=img,nfind=1,lower=-15,upper=15,llimit=PC.SPECAPERTURE_LLIMIT,ulimit=PC.SPECAPERTURE_ULIMIT,b_sample=PC.BACKGROUND,background ='fit',weights ='none',readnoi=PC.READNOISE,gain=EffectiveGain,t_function=PC.TRACEFUNC,t_order=PC.TRACEORDER,t_niterate=1,ylevel=PC.SPECAPERTURE,interactive=PC.VER)  #weights= 'variance' seems to be unstable for our high effective gain
             #Extracting the Lamp arc for this spectra as img_arc.fits
-            iraf.apall(input=os.path.join(PC.MOTHERDIR,night,Img2Lamp[img]),reference=img,out=os.path.splitext(img)[0]+'_arc',recenter='no',trace='no',background='none',interactive='no')
+            iraf.apall(input=PC.GetFullPath(Img2Lamp[img]),reference=img,out=os.path.splitext(img)[0]+'_arc',recenter='no',trace='no',background='none',interactive='no')
             #Now reidentify the lines in this spectra
-            RepoLamp = 'RepoLamp_'+Img2Filt[img]+'.fits'
+            filtstr = Img2Filt[img].replace(" ","_") # Replace spaces in filter name for easier filenames
+            RepoLamp = 'RepoLamp_'+filtstr+'.fits'
             iraf.reidentify(reference=RepoLamp, images=os.path.splitext(img)[0]+'_arc',verbose='yes',interactive=PC.VER)
             #Edit the header of img to add ref lamp
             iraf.hedit(os.path.splitext(img)[0]+'.ms.fits', "REFSPEC1",os.path.splitext(img)[0]+'_arc.fits', add=1, ver=0)
@@ -129,17 +130,18 @@ def SpectralExtraction_subrout(PC):
         
         #At the end of the night Appending the name to the final spectra list of each band
         for filt in Filt2finalspecs.keys():
-            with open('FinalwcSpectralistin_'+filt+'.txt','w') as foo:
+            filtstr = filt.replace(" ","_") # Replace spaces in filter name for easier filenames
+            with open('FinalwcSpectralistin_'+filtstr+'.txt','w') as foo:
                 foo.write(' \n'.join(Filt2finalspecs[filt])+' \n')
 
-            print('List of final spectra in FinalwcSpectralistin_'+filt+'.txt')
+            print('List of final spectra in FinalwcSpectralistin_'+filtstr+'.txt')
             if PC.SCOMBINE == 'YES':
                 try:
-                    iraf.scombine(input='@FinalwcSpectralistin_'+filt+'.txt',output=filt+'_avg_'+Filt2finalspecs[filt][0],combine='average',scale='median')
-                    print('Averaging the spectra to final output '+filt+'_avg_'+Filt2finalspecs[filt][0])
+                    iraf.scombine(input='@FinalwcSpectralistin_'+filtstr+'.txt',output=filt+'_avg_'+Filt2finalspecs[filt][0],combine='average',scale='median')
+                    print('Averaging the spectra to final output '+filtstr+'_avg_'+Filt2finalspecs[filt][0])
                 except iraf.IrafError as e :
                     print(e)
-                    print('ERROR: Could not scombine images in FinalwcSpectralistin_'+filt+'.txt')
+                    print('ERROR: Could not scombine images in FinalwcSpectralistin_'+filtstr+'.txt')
 
             
     print('All nights over...')            
@@ -184,15 +186,16 @@ def SpectralPairSubtraction_subrout(PC):
         OutFilePrefix = raw_input('Enter the prefix of you want for reduced 1d spectra: ')
         for filt in FilterList:
             print("Working on filter : "+filt)
+            filtstr = filt.replace(" ","_") # Replace spaces in filter name for easier filenames
             #List of images with this filter.
-            Imglist = [img for img in Allimglist if Filtrfiledic[Ditherfiledic[img]][0] == filt ]
+            Imglist = [img for img in Allimglist if Filtrfiledic[Ditherfiledic[img]] == filt ]
             if len(Imglist) < 16 :
                 for i,img in enumerate(Imglist): iraf.display(os.path.join(PC.MOTHERDIR,PC.OUTDIR,night,img),i+1)
             else : print('Number of images more that 16, Hence not displaying in ds9')
             if len(Imglist) <= 26 and len(Imglist) != 0:
                 ABCDtoimg = dict()
                 Anumb = ord('A')
-                with open(os.path.join(PC.MOTHERDIR,PC.OUTDIR,night,'ABCDtoImageTable_'+filt+'.txt'),'w') as AlphatoFILE :
+                with open(os.path.join(PC.MOTHERDIR,PC.OUTDIR,night,'ABCDtoImageTable_'+filtstr+'.txt'),'w') as AlphatoFILE :
                     for i,img in enumerate(Imglist):
                         alpha = chr(Anumb+i)
                         ABCDtoimg[alpha] = img
@@ -208,7 +211,7 @@ def SpectralPairSubtraction_subrout(PC):
                 for instr in subpairs:
                     instr = instr.upper()
                     if len(instr) == 2 :
-                        Outimg = OutFilePrefix+'_'+filt+'_'+instr[0]+'-'+instr[1]+'.fits'
+                        Outimg = OutFilePrefix+'_'+filtstr+'_'+instr[0]+'-'+instr[1]+'.fits'
                         try:
                             iraf.imarith(operand1=PC.GetFullPath(ABCDtoimg[instr[0]]),op="-",operand2=PC.GetFullPath(ABCDtoimg[instr[1]]),result=PC.GetFullPath(Outimg))
                         except iraf.IrafError as e :
@@ -216,19 +219,19 @@ def SpectralPairSubtraction_subrout(PC):
                             print('Skipping to next instruction')
                             continue
                     elif len(instr) == 1 : 
-                        Outimg = OutFilePrefix+'_'+filt+'_'+instr[0]+'.fits'
+                        Outimg = OutFilePrefix+'_'+filtstr+'_'+instr[0]+'.fits'
                         shutil.copy(PC.GetFullPath(ABCDtoimg[instr[0]]),PC.GetFullPath(Outimg))
                     else : 
                         print("Could not understand "+instr)
                         continue
                     
-                    outlog.write(Outimg+' '+Lampfiledic[Ditherfiledic[ABCDtoimg[instr[0]]]]+' '+filt+' \n')
+                    outlog.write('{0} {1} "{2}" \n'.format(Outimg,Lampfiledic[Ditherfiledic[ABCDtoimg[instr[0]]]],filt))
                 #Now Copy the already identified Repository Lamps to this directory.
                 print("Copying already identified lines of this filter %s from Repository.."%(filt))
                 if not os.path.isdir(os.path.join(PC.MOTHERDIR,PC.OUTDIR,night,'database')): os.makedirs(os.path.join(PC.MOTHERDIR,PC.OUTDIR,night,'database'))
                 try:
-                    shutil.copy(PC.LAMPREPODIR+'/RepoLamp_'+filt+'.fits',os.path.join(PC.MOTHERDIR,PC.OUTDIR,night,'RepoLamp_'+filt+'.fits'))
-                    shutil.copy(PC.LAMPREPODIR+'/database/idRepoLamp_'+filt,os.path.join(PC.MOTHERDIR,PC.OUTDIR,night,'database','idRepoLamp_'+filt))
+                    shutil.copy(PC.LAMPREPODIR+'/RepoLamp_'+filtstr+'.fits',os.path.join(PC.MOTHERDIR,PC.OUTDIR,night,'RepoLamp_'+filtstr+'.fits'))
+                    shutil.copy(PC.LAMPREPODIR+'/database/idRepoLamp_'+filtstr,os.path.join(PC.MOTHERDIR,PC.OUTDIR,night,'database','idRepoLamp_'+filtstr))
                 except IOError as e:
                     print(e)
                     print("ERROR: Cannot find already identified lines of this filter %s from Repository.."%(filt))
