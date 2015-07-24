@@ -1203,7 +1203,7 @@ def Flat_basicCorrections_subrout(PC):
             InpFlatFileList = os.path.splitext(objimgKey)[0]+'_Flat.list'
             #Load the flatnames to create a unique flatkey for each combination of flats
             with open(PC.GetFullPath(InpFlatFileList),'r') as flatlistFILE:
-                listofflats = [flatimg.rstrip() for flatimg in flatlistFILE]
+                listofflats = [flatimg.rstrip() for flatimg in flatlistFILE if flatimg.rstrip()]
             if len(listofflats) != 0 : # Atlest one flat exist for this object
                 FlatKey = ''.join(sorted(listofflats))  # a Key to uniquely identify the flat combination.
                 try:  # symlink if the flat is already created
@@ -1484,12 +1484,13 @@ def Bias_Subtraction_subrout(PC,method="median"):
                 for flatimg,bsflatimg in zip(Flatfiledic[objimgKey],BSflatimgs):
                     if not os.path.isfile(PC.GetFullPath(bsflatimg)): #If the bias subtracted flat already doesn't exist.
                         iraf.imarith(operand1=PC.GetFullPath(flatimg),op="-",operand2=PC.GetFullPath(ObjectBiasDic[objimgKey]),result=PC.GetFullPath(bsflatimg))
-
-                if PC.USEALLFLATS != 'Y': # Create the list of flats to combine form this directory itself.
-                    with open(PC.GetFullPath(OutMasterFlatList),'w') as flatlistFILE:
-                        flatlistFILE.write('\n'.join([PC.GetFullPath(bsflatimgs) for bsflatimgs in BSflatimgs])+'\n')
             else:
                 print('ALERT: No Flats for doing flat correction of {0} from same night'.format(objimg))
+                BSflatimgs = []
+            # Create the list of flats to combine from this directory itself. # Will be overwritten at end of this function if PC.USEALLFLATS == Y
+            with open(PC.GetFullPath(OutMasterFlatList),'w') as flatlistFILE:
+                flatlistFILE.write('\n'.join([PC.GetFullPath(bsflatimgs) for bsflatimgs in BSflatimgs])+'\n')
+
             if PC.USEALLFLATS == 'Y': # Save the name of the list to create flat from all other directories in the end of this function
                 SuperMasterFlatListsFileNamesnFiltr[PC.GetFullPath(OutMasterFlatList)] = Filtrfiledic[objimgKey]
 
@@ -1540,11 +1541,15 @@ def Bias_Subtraction_subrout(PC,method="median"):
             outObjectFinalFILE.close()
             if PC.TODO == 'S': outObjectLampFILE.close()
 
-    ### Now write the Flats to cobine list if we are using SuperMasterFlat
+    ### Now rewrite the list of Flats to combine if we are using SuperMasterFlat
     if PC.USEALLFLATS == 'Y':
         for flatslistfilename,filtr in SuperMasterFlatListsFileNamesnFiltr.items():
             with open(flatslistfilename,'w') as flatlistFILE:
-                flatlistFILE.write('\n'.join(SuperMasterFilterFlatdic[filtr])+'\n')
+                try:
+                    flatlistFILE.write('\n'.join(SuperMasterFilterFlatdic[filtr])+'\n')
+                except KeyError as e:
+                    print('\033[91m ERROR \033[0m: No Flats for the filter {0} in entire list of directories'.format(filtr))
+                    print(e)
 
     print('All nights over...')             
                 
