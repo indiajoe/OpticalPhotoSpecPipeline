@@ -137,7 +137,7 @@ def SpectralExtraction_subrout(PC):
             print('List of final spectra in FinalwcSpectralistin_'+filtstr+'.txt')
             if PC.SCOMBINE == 'YES':
                 try:
-                    iraf.scombine(input='@FinalwcSpectralistin_'+filtstr+'.txt',output=filt+'_avg_'+Filt2finalspecs[filt][0],combine='average',scale='median')
+                    iraf.scombine(input='@FinalwcSpectralistin_'+filtstr+'.txt',output=filtstr+'_avg_'+Filt2finalspecs[filt][0],combine='average',scale='median')
                     print('Averaging the spectra to final output '+filtstr+'_avg_'+Filt2finalspecs[filt][0])
                 except iraf.IrafError as e :
                     print(e)
