@@ -961,6 +961,8 @@ def Createlist_subrout(PC):
             continue
 
         for imgline in ImgsFILE:
+            if len(imgline.rstrip().split()) < 2: # Skip blank lines if any
+                continue
             img = imgline.rstrip().split()[1]
             imgKey = imgline.rstrip().split()[0]
             imgfilter = Filtrfiledic[imgKey]
