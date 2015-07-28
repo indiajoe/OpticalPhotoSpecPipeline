@@ -2520,10 +2520,12 @@ def main():
             CalledTheTask=True
             try:
                 task = int(task)
+                if task not in Instrument.StepsToRun : 
+                    raise IndexError('Task asked to run is not consistent with .conf file') # Raise Index error if a task not supposed to be run was given.
                 print(Instrument.Steps[task]['RunMessage'])
-            except ValueError, IndexError :
+            except (ValueError, IndexError) :
                 print('Cannot understand the input task: {0}'.format(task))
-                print('Skipping task '+task)
+                print('Skipping task :{0}'.format(task))
                 CalledTheTask=False
             else: # Run the task..
                 Instrument.Steps[task]['function'](PC)
