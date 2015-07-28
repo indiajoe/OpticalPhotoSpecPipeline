@@ -1303,9 +1303,6 @@ def Bias_Subtraction_subrout(PC,method="median"):
     iraf.bias(_doprint=0)
     iraf.colbias.unlearn()  
 
-    iraf.ccdred(_doprint=0)
-    iraf.zerocombine.unlearn()  
-
     directories = LoadDirectories(PC,CONF=False)
 
     if PC.USEALLFLATS == 'Y':
@@ -1436,7 +1433,7 @@ def Bias_Subtraction_subrout(PC,method="median"):
                     OutMasterBiasList = os.path.splitext(flatimg)[0]+'_Bias.list'
                     with open(PC.GetFullPath(OutMasterBiasList),'w') as biaslistFILE:
                         biaslistFILE.write('\n'.join([PC.GetFullPath(biasimg) for biasimg in FlatBiasfiledic[flatimgKey]])+'\n')
-                    iraf.zerocombine(input= "@"+PC.GetFullPath(OutMasterBiasList), output=PC.GetFullPath(OutMasterBias), combine="median", ccdtype="")
+                    ImgCombineWithZeroFloating(PC.GetFullPath(OutMasterBiasList),PC.GetFullPath(OutMasterBias),cmethod="median",czero="median",creject="pclip",cstatsection=PC.FLATSTATSECTION)
                     # Add to the dictionary
                     MasterBiasDic[BiasKey] = OutMasterBias
                 finally:
@@ -1461,7 +1458,7 @@ def Bias_Subtraction_subrout(PC,method="median"):
                 OutMasterBiasList = os.path.splitext(objimg)[0]+'_Bias.list'
                 with open(PC.GetFullPath(OutMasterBiasList),'w') as biaslistFILE:
                     biaslistFILE.write('\n'.join([PC.GetFullPath(biasimg) for biasimg in Biasfiledic[objimgKey]])+'\n')
-                iraf.zerocombine(input= "@"+PC.GetFullPath(OutMasterBiasList), output=PC.GetFullPath(OutMasterBias), combine="median", ccdtype="")
+                ImgCombineWithZeroFloating(PC.GetFullPath(OutMasterBiasList),PC.GetFullPath(OutMasterBias),cmethod="median",czero="median",creject="pclip",cstatsection=PC.FLATSTATSECTION)
                 # Add to the dictionary
                 MasterBiasDic[BiasKey] = OutMasterBias
             finally:
