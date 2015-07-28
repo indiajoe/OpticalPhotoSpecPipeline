@@ -1575,6 +1575,7 @@ def Manual_InspectCalframes_subrout(PC):
     AcceptAllEveryNight = False
     for night in directories:
         print("Working on night :\033[91m {0} \033[0m ".format(night))
+        PC.currentnight = night # Upgating the night directory for using GetFullPath()
         AlwaysRemove = []
         AlwaysAccept = []
         for inpfile,outfile in zip(filelist,outfilelist):
@@ -1599,8 +1600,8 @@ def Manual_InspectCalframes_subrout(PC):
                 if not AcceptAllThisNight :
                     for img in CalImgs:
                         if img not in AlwaysAccept:
-                            iraf.display(night+'/'+img,1)
-                            print(night+'/'+img)
+                            iraf.display(PC.GetFullPath(img),1)
+                            print(PC.GetFullPath(img))
                             verdict=''
                             verdict=raw_input('Enter "r" to reject, "ra" to reject always in future, "aa" to always accept in future:')
                             if verdict == 'r' :
@@ -1663,7 +1664,9 @@ def Manual_InspectObj_subrout(PC):
                 
             print(objline)
             if PC.TODO == 'P':print('\n To discard this image press _q_ without pressing _a_')
-            if PC.TODO == 'S':print('\n To discard this image press _q_ without pressing _j_')
+            if PC.TODO == 'S':
+                if PC.DISPAXIS == 2 : print('\n To discard this image press _q_ without pressing _j_')
+                if PC.DISPAXIS == 1 : print('\n To discard this image press _q_ without pressing _k_')
             try:
                 imx = iraf.imexam(Stdout=1)
             except iraf.IrafError as e :
@@ -1713,7 +1716,26 @@ def Manual_InspectObj_subrout(PC):
         subprocess.call(PC.TEXTEDITOR.split()+[os.path.join(PC.MOTHERDIR,PC.OUTDIR,night,'AllObjects2Combine.List')])
 
     print('All nights over...')
-        
+
+
+def ListOfBiasesForGivenImg(PC,ImgIndices,BiasSizeDic):
+    """ Returns the list of biase files which can be used for the input image subarray """
+    # Create list of bias for this frame
+    ImgXbegin, ImgXend,ImgYbegin, ImgYend, ImgXbin, ImgYbin = ImgIndices
+    BiaslistForImg = []
+    for key in BiasSizeDic:
+        if (ImgXbegin, ImgXend,ImgYbegin, ImgYend, ImgXbin, ImgYbin) == key:
+            BiaslistForImg += BiasSizeDic[key]
+        elif (ImgXbegin >= key[0]) and (ImgXend <= key[1]) and (ImgYbegin >= key[2]) and (ImgYend <= key[3]) and (ImgXbin == key[4]) and (ImgYbin == key[5]):
+            # We can trim out the bias frames to the image size
+            slicesection = '[{0}:{1},{2}:{3}]'.format(ImgXbegin-key[0]+1,ImgXend-key[0]+1,ImgYbegin-key[2]+1,ImgYend-key[2]+1)
+            for biasimg in BiasSizeDic[key]:
+                outputtrimedbias = biasimg[:-5]+'_{0}-{1}_{2}-{3}.fits'.format(ImgXbegin,ImgXend,ImgYbegin,ImgYend)
+                if not os.path.isfile(PC.GetFullPath(outputtrimedbias)):
+                    iraf.imcopy(input=PC.GetFullPath(biasimg)+slicesection,output=PC.GetFullPath(outputtrimedbias))
+                BiaslistForImg.append(outputtrimedbias)
+    return BiaslistForImg
+
              
 def SelectionofFrames_subrout(PC):
     """ Selects the images to reduce and create tables of corresponding Flat, Sky and Lamps """
@@ -1744,6 +1766,7 @@ def SelectionofFrames_subrout(PC):
     #Generating list of objects frames
     for night in directories:
         print("Working on night : "+night)
+        PC.currentnight = night # Upgating the night directory for using GetFullPath()
         print("Obs log file: file://{0}".format(os.path.join(PC.MOTHERDIR,night,LogFilename)))
         InpObjRE = raw_input("Enter Regular Expression to select Science object frames (default: {0}): ".format(ObjRE)).strip(' ')
         if InpObjRE:
@@ -1793,8 +1816,8 @@ def SelectionofFrames_subrout(PC):
         BiasSizeDic = {}
         for imgline in imglogFILElines:
             if Instrument.IdentifyFrame(imgline) == 'BIAS':
-                # Append to the list of biases stored in dictinary with the key (X,Y)
-                BiasSizeDic.setdefault((imgline.split()[-3],imgline.split()[-2]), []).append(imgline.split()[0])
+                # Append to the list of biases stored in dictinary with the key (Xbegin,Xend,Ybegin,Yend,Xbin,Ybin)
+                BiasSizeDic.setdefault(tuple([int(i) for i in shlex.split(imgline)[-7:-1]]), []).append(imgline.split()[0])
 
         #Now ask for flats in each filters
         Flatlistdic = dict()
@@ -1823,7 +1846,7 @@ def SelectionofFrames_subrout(PC):
                     if filt == shlex.split(imgline)[FiltColumn]: # Matching filter
                         if filenumbregexp.search(imgline.split()[-1]): # Last column is filenumber
                             FlatList.append(imgline.split()[0])
-                            Flatsizedic[imgline.split()[0]] = tuple(shlex.split(imgline)[-3:-1])  # X, Y size of each flat
+                            Flatsizedic[imgline.split()[0]] = tuple([int(i) for i in shlex.split(imgline)[-7:-1]])  # (Xbegin,Xend,Ybegin,Yend,Xbin,Ybin) of each flat
             Flatlistdic[filt] = FlatList  #Saving flat list for this filter set
 
         #Now if Separate sky is being used to subtract, ask for each filter
@@ -1862,7 +1885,7 @@ def SelectionofFrames_subrout(PC):
             for filt in FiltList:
                 filenumbregexp = re.compile(r'.*')
                 if filt not in LampREdic.keys() : 
-                    LampREdic[filt] = '.*Fe-.*'  #Setting default to *Lamp*
+                    LampREdic[filt] = '.*Fe.*'  #Setting default to *Lamp*
                 #Ask user again to confirm or change if he/she needs to
                 InpfiltRE = raw_input("Enter Regular Expression for the Lamp of filters %s (default: %s) : "%(str(filt),LampREdic[filt])).strip(' ')
                 if InpfiltRE :
@@ -1892,11 +1915,14 @@ def SelectionofFrames_subrout(PC):
             Name=shlex.split(Objline)[0]
             FiltOrGrism = shlex.split(Objline)[FiltColumn]
             ObjFlatFILE.write(Name+'  '+' '.join(Flatlistdic[FiltOrGrism])+'\n')
-            ImgSizeX, ImgSizeY = tuple(shlex.split(Objline)[-3:-1])
-            try:
-                ObjBiasFILE.write(Name+'  '+' '.join(BiasSizeDic[(ImgSizeX, ImgSizeY)])+'\n')
-            except KeyError:
-                print('\033[91m ERROR \033[0m: No Bias found for object img {0} with size {1},{2}'.format(Name,ImgSizeX, ImgSizeY))
+
+            ObjimgIndices = tuple([int(i) for i in shlex.split(Objline)[-7:-1]])
+            BiaslistForImg = ListOfBiasesForGivenImg(PC,ObjimgIndices,BiasSizeDic)
+
+            if BiaslistForImg:
+                ObjBiasFILE.write(Name+'  '+' '.join(BiaslistForImg)+'\n')
+            else:
+                print('\033[91m ERROR \033[0m: No Bias found for object img {0} with size {1}'.format(Name,ObjimgIndices))
                 if PC.SEPARATESKY=='Y':  print('Since you are subtracting seperate sky, I am ignoring this..')
                 else: print('Find bias for this night, copy here and rerun pipeline for this directory.')
                 ObjBiasFILE.write(Name+' \n')
@@ -1912,11 +1938,13 @@ def SelectionofFrames_subrout(PC):
             for filt in FiltList|CompleteFiltList:
                 FiltrFlatFILE.write('"{0}" {1}\n'.format(filt,' '.join(Flatlistdic[filt])))
                 for flatimg in Flatlistdic[filt]:
-                    ImgSizeX, ImgSizeY = Flatsizedic[flatimg]
-                    try:
-                        FlatBiasFILE.write('{0} {1}\n'.format(flatimg,' '.join(BiasSizeDic[(ImgSizeX, ImgSizeY)])))
-                    except KeyError:
-                        print('\033[91m ERROR \033[0m: No Bias found for flat img {0} with size {1},{2}'.format(flatimg,ImgSizeX, ImgSizeY))
+                    FlatimgIndices = Flatsizedic[flatimg]
+                    BiaslistForFlat = ListOfBiasesForGivenImg(PC,FlatimgIndices,BiasSizeDic)
+
+                    if BiaslistForFlat:
+                        FlatBiasFILE.write('{0} {1}\n'.format(flatimg,' '.join(BiaslistForFlat)))
+                    else:
+                        print('\033[91m ERROR \033[0m: No Bias found for flat img {0} with size {1}'.format(flatimg,FlatimgIndices))
                         print('Flat without bias subtraction is useless, and also harmful to other good flats of the night.')
                         print('Find bias for this night, copy here and rerun pipeline. (or remove this flat!)')
                         raise
@@ -1943,8 +1971,8 @@ def CreateLogFilesFromFits_subrout(PC,hdu=0):
     directories = LoadDirectories(PC,CONF=True)
     LogFilename = PC.NIGHTLOGFILE
     # List the set of coulmn entry after the filename in the log. Last three extra columns will be Xsize Ysize and filenumber.
-    LogColumns = [PC.OBJECTHDR, PC.EXPTIMEHDR, PC.FILTERHDR, PC.GRISMHDR, PC.LAMPHDR, PC.SLITHDR, PC.DATEHDR, PC.UTHDR, PC.RAHDR, PC.DECHDR, PC.COMMENTHDR] 
-    #Final column heads will be: Filename LogColumns Xsize Ysize FileNumber
+    LogColumns = [PC.OBJECTHDR, PC.EXPTIMEHDR, PC.FILTERHDR, PC.GRISMHDR, PC.LAMPHDR, PC.SLITHDR, PC.DATEHDR, PC.UTHDR, PC.RAHDR, PC.DECHDR, PC.COMMENTHDR, PC.XSTARTHDR, PC.XENDHDR, PC.YSTARTHDR, PC.YENDHDR, PC.XBINHDR, PC.YBINHDR] 
+    #Final column heads will be: Filename LogColumns FileNumber
 
     RowString = ' "{'+'}" "{'.join(LogColumns)+'}"'  # String with  header keywords in curly brackets " "
     # Load Instrument
@@ -1962,13 +1990,12 @@ def CreateLogFilesFromFits_subrout(PC,hdu=0):
         with open(LogFilename,'w') as outfile:
             for i,img in enumerate(listOFimgs):
                 hdulist = fits.open(img)
-                ImgSizeX, ImgSizeY = hdulist[hdu].data.shape
                 prihdr = hdulist[hdu].header
                 prihdr = Instrument.StandardiseHeader(prihdr)
                 for hkeys in LogColumns :   #Capture if these keywords are missing in header, and replace with -NA-
                     if hkeys not in prihdr : prihdr[hkeys]='-NA-'
                 
-                outfile.write(img+' '+RowString.format(**prihdr)+' {0} {1} {2}\n'.format(ImgSizeX,ImgSizeY,i))
+                outfile.write(img+' '+RowString.format(**prihdr)+' {0}\n'.format(i))
                 hdulist.close()
     print("{0} saved in each night's directory. Edit in manually for errors like ACTIVE filter.".format(LogFilename))
 
@@ -2170,6 +2197,19 @@ class PipelineConfig(object):
                         self.OBJECTHDR = con.split()[1]
                     elif con.split()[0] == "COMMENT=" :
                         self.COMMENTHDR = con.split()[1]
+                    elif con.split()[0] == "XSTART=" : 
+                        self.XSTARTHDR = con.split()[1]
+                    elif con.split()[0] == "XEND=" : 
+                        self.XENDHDR = con.split()[1]
+                    elif con.split()[0] == "YSTART=" : 
+                        self.YSTARTHDR = con.split()[1]
+                    elif con.split()[0] == "YEND=" : 
+                        self.YENDHDR = con.split()[1]
+                    elif con.split()[0] == "XBIN=" : 
+                        self.XBINHDR = con.split()[1]
+                    elif con.split()[0] == "YBIN=" : 
+                        self.YBINHDR = con.split()[1]
+
                     elif con.split()[0] == "RA_HDR=" : 
                         self.RAHDR = con.split()[1]
                     elif con.split()[0] == "DEC_HDR=" :
@@ -2285,13 +2325,22 @@ class InstrumentObject(object):
         if self.Name == 'HFOSC':
             ut_sec = float(prihdr[self.PC.UTHDR])
             prihdr[self.PC.UTHDR] = str(datetime.timedelta(seconds=ut_sec))  # Converting to HH:MM:SS
+            # XBEGIN, XEND, YBEGIN, YEND, XBIN, YBIN etc not in HFOSC header. so we shall add dummy values
+            prihdr[self.PC.XBEGINHDR] = 1
+            prihdr[self.PC.XENDHDR] = prihdr['NAXIS1']
+            prihdr[self.PC.YBEGINHDR] = 1
+            prihdr[self.PC.YENDHDR] = prihdr['NAXIS2']
+            # If the Xsize is 250 then it must be most likely binned by 2 in Xaxis for HFOSC!!
+            prihdr[self.PC.XBINHDR] = 2 if prihdr['NAXIS1'] == 250 else 1
+            prihdr[self.PC.YBINHDR] = 1
+
         elif self.Name == 'IFOSC':
             prihdr[self.PC.EXPTIMEHDR] = float(prihdr[self.PC.EXPTIMEHDR])/1000.0  # Conver ms to sec for IFOSC
         return prihdr
 
     def IdentifyFrame(self,ObjectLine):
         """ Returns what object the input frame is based on the ObjectLine 
-        'Filename, PC.OBJECTHDR, PC.EXPTIMEHDR, PC.FILTERHDR, PC.GRISMHDR, PC.LAMPHDR, PC.SLITHDR, PC.DATEHDR, PC.UTHDR, PC.RAHDR, PC.DECHDR, PC.COMMENTHDR, Xsize, Ysize, FileNumber' """
+        'Filename, PC.OBJECTHDR, PC.EXPTIMEHDR, PC.FILTERHDR, PC.GRISMHDR, PC.LAMPHDR, PC.SLITHDR, PC.DATEHDR, PC.UTHDR, PC.RAHDR, PC.DECHDR, PC.COMMENTHDR, PC.XSTARTHDR, PC.XENDHDR, PC.YBEGINHDR, PC.YENDHDR, PC.XBINHDR, PC.YBINHDR, FileNumber' """
         Frame = 'UNKNOWN'
         if self.Name == 'HFOSC':
             if float(shlex.split(ObjectLine)[2]) == 0:
