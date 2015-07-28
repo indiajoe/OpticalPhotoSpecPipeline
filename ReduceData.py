@@ -1473,7 +1473,12 @@ def Bias_Subtraction_subrout(PC,method="median"):
                     if not os.path.isfile(PC.GetFullPath(bslampimg)): #If the bias subtracted lamp already doesn't exist.
                         iraf.imarith(operand1=PC.GetFullPath(lampimg),op="-",operand2=PC.GetFullPath(ObjectBiasDic[objimgKey]),result=PC.GetFullPath(bslampimg))
                 # Keep only the first lamp in the list, since we need only one for Wavelength calibration
-                ObjectLampDic[objimgKey] = BSlampimgs[0]
+                try:
+                    ObjectLampDic[objimgKey] = BSlampimgs[0]
+                except IndexError:
+                    print('\033[91m ERROR \033[0m: No Lamps for doing wavelength correction of object {0}'.format(objimgKey))
+                    print('Add a lamp manually in the file://{0}'.format(os.path.join(PC.MOTHERDIR,PC.OUTDIR,night,'AllObjects-BSFinalLamp.List')))
+                    ObjectLampDic[objimgKey] = ''
 
 
             ###### Subtract Bias from Flat frames for each image
