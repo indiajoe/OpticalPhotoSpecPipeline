@@ -2330,10 +2330,10 @@ class InstrumentObject(object):
         if self.Name == 'HFOSC':
             ut_sec = float(prihdr[self.PC.UTHDR])
             prihdr[self.PC.UTHDR] = str(datetime.timedelta(seconds=ut_sec))  # Converting to HH:MM:SS
-            # XBEGIN, XEND, YBEGIN, YEND, XBIN, YBIN etc not in HFOSC header. so we shall add dummy values
-            prihdr[self.PC.XBEGINHDR] = 1
+            # XSTART, XEND, YSTART, YEND, XBIN, YBIN etc not in HFOSC header. so we shall add dummy values
+            prihdr[self.PC.XSTARTHDR] = 1
             prihdr[self.PC.XENDHDR] = prihdr['NAXIS1']
-            prihdr[self.PC.YBEGINHDR] = 1
+            prihdr[self.PC.YSTARTHDR] = 1
             prihdr[self.PC.YENDHDR] = prihdr['NAXIS2']
             # If the Xsize is 250 then it must be most likely binned by 2 in Xaxis for HFOSC!!
             prihdr[self.PC.XBINHDR] = 2 if prihdr['NAXIS1'] == 250 else 1
@@ -2345,7 +2345,7 @@ class InstrumentObject(object):
 
     def IdentifyFrame(self,ObjectLine):
         """ Returns what object the input frame is based on the ObjectLine 
-        'Filename, PC.OBJECTHDR, PC.EXPTIMEHDR, PC.FILTERHDR, PC.GRISMHDR, PC.LAMPHDR, PC.SLITHDR, PC.DATEHDR, PC.UTHDR, PC.RAHDR, PC.DECHDR, PC.COMMENTHDR, PC.XSTARTHDR, PC.XENDHDR, PC.YBEGINHDR, PC.YENDHDR, PC.XBINHDR, PC.YBINHDR, FileNumber' """
+        'Filename, PC.OBJECTHDR, PC.EXPTIMEHDR, PC.FILTERHDR, PC.GRISMHDR, PC.LAMPHDR, PC.SLITHDR, PC.DATEHDR, PC.UTHDR, PC.RAHDR, PC.DECHDR, PC.COMMENTHDR, PC.XSTARTHDR, PC.XENDHDR, PC.YSTARTHDR, PC.YENDHDR, PC.XBINHDR, PC.YBINHDR, FileNumber' """
         Frame = 'UNKNOWN'
         if self.Name == 'HFOSC':
             if float(shlex.split(ObjectLine)[2]) == 0:
