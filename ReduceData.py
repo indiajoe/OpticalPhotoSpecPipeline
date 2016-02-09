@@ -1,8 +1,9 @@
 #!/usr/bin/env python
 #This script is to semi-automate basic data reduction of Optical Imaging and Spectroscopic data.
-#Instruments it supports are
+#Instruments this pipeline support are
 # HFOSC  @HCT,IAO,IIA,India
 # IFOSC  @IGO,IUCAA,India
+# ARIES1.3m512 @1.3m ARIES, Nanital
 
 #------------------------------------Take a deep breath
 # There was this programmer, the story goes, who was
@@ -1996,7 +1997,7 @@ def CreateLogFilesFromFits_subrout(PC,hdu=0):
             for i,img in enumerate(listOFimgs):
                 hdulist = fits.open(img)
                 prihdr = hdulist[hdu].header
-                prihdr = Instrument.StandardiseHeader(prihdr)
+                prihdr = Instrument.StandardiseHeader(prihdr,filename=img)
                 for hkeys in LogColumns :   #Capture if these keywords are missing in header, and replace with -NA-
                     if hkeys not in prihdr : prihdr[hkeys]='-NA-'
                 
@@ -2320,12 +2321,20 @@ class InstrumentObject(object):
                 StepsToRun += [7, 8, 9, 10]
             elif self.PC.TODO == 'S':
                 StepsToRun += [11, 12]
+
+        elif self.Name in ['ARIES1.3m512']:
+            StepsToRun += [0, 1, 2, 3, 4, 5]
+            if self.PC.IMGCOMBINE == 'Y':
+                StepsToRun += [ 6 ]
+            if self.PC.TODO == 'P':
+                StepsToRun += [7, 8, 9, 10]
+
         else:
             print('Unknown Instrument')
 
         return StepsToRun
 
-    def StandardiseHeader(self,prihdr):
+    def StandardiseHeader(self,prihdr,filename=None):
         """ Return the heared object after standardising the values in it, specific to instrument."""
         if self.Name == 'HFOSC':
             ut_sec = float(prihdr[self.PC.UTHDR])
@@ -2341,6 +2350,20 @@ class InstrumentObject(object):
 
         elif self.Name == 'IFOSC':
             prihdr[self.PC.EXPTIMEHDR] = float(prihdr[self.PC.EXPTIMEHDR])/1000.0  # Conver ms to sec for IFOSC
+
+        elif self.Name == 'ARIES1.3m512':
+            date_ut = prihdr[self.PC.UTHDR]  # Is in the form YYYY-MM-DDTHH:MM:SS
+            date = date_ut.split('T')[0]
+            ut = date_ut.split('T')[1]
+            prihdr[self.PC.UTHDR] = ut  # in HH:MM:SS
+            prihdr[self.PC.DATEHDR] = date
+            
+            # Filter and object name has to be read form filename
+            fsearch = re.search('(.*)([ubvriUBVRI]).*',os.path.splitext(filename)[0])
+            if fsearch:
+                prihdr[self.PC.OBJECTHDR] = fsearch.group(1)
+                prihdr[self.PC.FILTERHDR] = fsearch.group(2).upper()
+
         return prihdr
 
     def IdentifyFrame(self,ObjectLine):
@@ -2372,6 +2395,13 @@ class InstrumentObject(object):
                     Frame = 'OBJECT_SPEC'
             else:
                 Frame = 'OBJECT_IMG'
+
+        if self.Name == 'ARIES1.3m512':
+            if float(shlex.split(ObjectLine)[2]) < 0.1:
+                Frame = 'BIAS'
+            else:
+                Frame = 'OBJECT_IMG'
+
 
         return Frame
         
@@ -2490,6 +2520,54 @@ InstrumentDictionaries = {'HFOSC':{
         12: {'Menu': 'Extract wavelength calibrated 1D spectra from image.',
              'RunMessage': "RUNNING TASK:12  Extracting wavelength calibrated 1D spectra..",
              'function': SpectralExtraction_subrout }
+    }
+},
+'ARIES1.3m512':{
+    'Banner' :"""
+          __   ____            _____ __ ___  
+     /\  /_ | |___ \          | ____/_ |__ \ 
+    /  \  | |   __) |_ __ ___ | |__  | |  ) |
+   / /\ \ | |  |__ <| '_ ` _ \|___ \ | | / / 
+  / ____ \| |_ ___) | | | | | |___) || |/ /_ 
+ /_/    \_\_(_)____/|_| |_| |_|____/ |_|____|
+                                                                
+                                          Data Reduction Pipeline...
+""",
+    'About' : "ARIES Optical Imager Camera 512x512 1.3-m Nanital",
+    'Steps' : {
+        0 : {'Menu': 'Generate Log files of fits files in each directory.',
+             'RunMessage': "RUNNING TASK:0  Generating log files of fits files in each directory..",
+             'function': CreateLogFilesFromFits_subrout },
+        1 : {'Menu': 'Selection of object frames, Flats/Sky etc. to reduce',
+             'RunMessage': "RUNNING TASK:1 Selecting object frames, Flats/Sky etc..",
+             'function': SelectionofFrames_subrout },
+        2 : {'Menu': 'Visually inspect and/or reject object images one by one.',
+             'RunMessage': "RUNNING TASK:2  Visual inspection and/or rejection of object frames..",
+             'function': Manual_InspectObj_subrout},
+        3 : {'Menu': 'Visually inspect and/or reject Bias/Flats/Sky one by one.',
+             'RunMessage': "RUNNING TASK:3  Visual inspection and/or rejection of Bias/Flats/Sky frames..",
+             'function': Manual_InspectCalframes_subrout},
+        4 : {'Menu': 'Subtract Overscan,Bias/sky',
+             'RunMessage': "RUNNING TASK:4  Subtracting biases or sky..",
+             'function': Bias_Subtraction_subrout},
+        5 : {'Menu': 'Apply Flat Correction and/or Bad pixel interpolation',
+             'RunMessage': "RUNNING TASK:5  Flat correction etc..",
+             'function': Flat_basicCorrections_subrout},
+        6 : {'Menu': 'Align and combine images.',
+             'RunMessage': "RUNNING TASK:6  Aligning and combining images..",
+             'function': AlignNcombine_subrout },
+        7 : {'Menu': 'Make the list of images, Images4Photo.in to do Photometry.',
+             'RunMessage': "RUNNING TASK:7  Makeing list of images, Images4Photo.in to do Photometry..",
+             'function': Createlist_subrout },
+        8 : {'Menu': 'Select Stars and Sky region of the field on first image',
+             'RunMessage': "RUNNING TASK:8  Selecting Stars and Sky region of the field from first image..",
+             'function': Star_sky_subrout },
+        9 : {'Menu': 'Create Sextracter config file & coordinate output of first image.',
+             'RunMessage': "RUNNING TASK:9  Create Sextracter config file & coordinate output of first image..",
+             'function': Sextractor_subrout },
+        10 : {'Menu': 'Do Photometry',
+             'RunMessage': "RUNNING TASK:10 Doing Photometry..",
+             'function': Photometry }
     }
 }
 } # END of Instrument Definitions..#######
