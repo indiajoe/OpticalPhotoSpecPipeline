@@ -44,6 +44,7 @@ import datetime
 from astropy.time import Time
 from astropy.io import ascii
 import astropy.table as table 
+import astroscrappy
 
 # Required for certain functions... Remove it if not needed for your module
 from pyraf import iraf
@@ -1113,6 +1114,21 @@ def DivideSmoothGradient(PC,inputimg,outputimg):
     # Return the name of the output filename
     return outputimg
                                 
+def RemoveCosmicRays(inputimg,outputimg):
+    """ This will use La Cosmic algorithm to remove the cosmic rays in the image
+        In the end it will return the output filename."""
+    hdulist = fits.open(inputimg)
+    inputimgdata = hdulist[0].data
+    print('Removing cosmic rays..')
+    crmask, cleanarr = astroscrappy.detect_cosmics(inputimgdata)
+    prihdr= hdulist[0].header
+    hdulist[0].data = cleanarr
+    prihdr.add_history('Removed CosmicRays using LaCosmic')
+    hdulist.writeto(outputimg)
+    hdulist.close()
+    # Return the name of the output filename
+    return outputimg
+
 def SubtractSmoothGradient(PC,inputimg,outputimg):
     """ This will subract smooth gradients in image based on median filter smooting parameters in PC.
         In the end it will return the output filename."""
@@ -1262,7 +1278,16 @@ def Flat_basicCorrections_subrout(PC):
                 OutGSobjimg = SubtractSmoothGradient(PC,PC.GetFullPath(OutFCobjimg),PC.GetFullPath(OutGSobjimg))
                 #Updating the final image name with new _GS appended 
                 OutFinalimg = os.path.basename(OutGSobjimg)
-            
+
+            #If asked to do cosmic ray removal in the image after everything is over now..
+            if PC.REMOVECOSMIC == 'Y':
+                print('Removing Cosmic Rays from '+objimg)
+                OutCRobjimg = os.path.splitext(OutFinalimg)[0]+'_CR.fits'
+                OutCRobjimg = RemoveCosmicRays(PC.GetFullPath(OutFinalimg),PC.GetFullPath(OutCRobjimg))
+                #Updating the final image name with new _CR appended 
+                OutFinalimg = os.path.basename(OutCRobjimg)
+
+
             ObjectFinalImgDic[objimgKey] = OutFinalimg
 
 
@@ -2155,6 +2180,9 @@ class PipelineConfig(object):
 
                     elif con.split()[0] == "SEPARATE_SKY=" :
                         self.SEPARATESKY = con.split()[1][0].upper()
+                    elif con.split()[0] == "REMOVE_COSMIC=" :
+                        self.REMOVECOSMIC = con.split()[1][0].upper()
+
                     elif con.split()[0] == "GRADIENT_REMOVE=" :
                         self.GRADREMOVE = con.split()[1][0].upper()
                     elif con.split()[0] == "GRAD_FILT_SIZE=" :
@@ -2439,7 +2467,7 @@ InstrumentDictionaries = {'HFOSC':{
         4 : {'Menu': 'Subtract Overscan,Bias/sky',
              'RunMessage': "RUNNING TASK:4  Subtracting biases or sky..",
              'function': Bias_Subtraction_subrout},
-        5 : {'Menu': 'Apply Flat Correction and/or Bad pixel interpolation',
+        5 : {'Menu': 'Apply Flat Correction and/or Bad pixel interpolation, and/or CR removal',
              'RunMessage': "RUNNING TASK:5  Flat correction etc..",
              'function': Flat_basicCorrections_subrout},
         6 : {'Menu': 'Align and combine images.',
@@ -2496,7 +2524,7 @@ InstrumentDictionaries = {'HFOSC':{
         4 : {'Menu': 'Subtract Overscan,Bias/sky',
              'RunMessage': "RUNNING TASK:4  Subtracting biases and/or I fringe subtraction etc..",
              'function': Bias_Subtraction_subrout},
-        5 : {'Menu': 'Apply Flat Correction and/or Bad pixel interpolation',
+        5 : {'Menu': 'Apply Flat Correction and/or Bad pixel interpolation and/or CR removal',
              'RunMessage': "RUNNING TASK:5  Flat correction etc..",
              'function': Flat_basicCorrections_subrout},
         6 : {'Menu': 'Align and combine images.',
@@ -2550,7 +2578,7 @@ InstrumentDictionaries = {'HFOSC':{
         4 : {'Menu': 'Subtract Overscan,Bias/sky',
              'RunMessage': "RUNNING TASK:4  Subtracting biases or sky..",
              'function': Bias_Subtraction_subrout},
-        5 : {'Menu': 'Apply Flat Correction and/or Bad pixel interpolation',
+        5 : {'Menu': 'Apply Flat Correction and/or Bad pixel interpolation and/or CR removal',
              'RunMessage': "RUNNING TASK:5  Flat correction etc..",
              'function': Flat_basicCorrections_subrout},
         6 : {'Menu': 'Align and combine images.',
