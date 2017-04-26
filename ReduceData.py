@@ -1154,17 +1154,17 @@ def FixBadPixels(PC,images,nightdir):
 def ImgCombineWithZeroFloating(imglistfname,outputfile,cmethod="median",czero="median",creject="avgsigclip",cstatsection='[200:800,200:800]'):
     """ Returns the combined image with actuall average median flux, It does zero scaleing only for sigma rejection of stars. This is needed to remove faint stars in rejection algorithm when the background sky itself is varying from frame to frame. """
     iraf.imcombine.unlearn()
-    Xmin=float(cstatsection[1:-1].split(',')[0].split(':')[0])  #Everything now in fits coordinates
-    Xmax=float(cstatsection[1:-1].split(',')[0].split(':')[1])
-    Ymin=float(cstatsection[1:-1].split(',')[1].split(':')[0])
-    Ymax=float(cstatsection[1:-1].split(',')[1].split(':')[1])
+    Xmin=int(cstatsection[1:-1].split(',')[0].split(':')[0])  #Everything now in fits coordinates
+    Xmax=int(cstatsection[1:-1].split(',')[0].split(':')[1])
+    Ymin=int(cstatsection[1:-1].split(',')[1].split(':')[0])
+    Ymax=int(cstatsection[1:-1].split(',')[1].split(':')[1])
 
     if czero == "median" : statfunction = np.median
     elif czero == "average" : statfunction = np.mean
     else : 
         print('Error: czero should be median or average. Unknown option {0}'.format(czero))
         raise
-
+    print('Using Stat section: {0}'.format(cstatsection))
     with open(imglistfname,'r') as imgfile:
         statlist=[]
         for img in imgfile:
