@@ -1182,8 +1182,8 @@ def ImgCombineWithZeroFloating(imglistfname,outputfile,cmethod="median",czero="m
     iraf.imcombine.unlearn()
     Xmin, Xmax, Ymin, Ymax = parse_slicingstring(cstatsection)
 
-    if czero == "median" : statfunction = np.median
-    elif czero == "average" : statfunction = np.mean
+    if czero == "median" : statfunction = np.nanmedian
+    elif czero == "average" : statfunction = np.nanmean
     else : 
         print('Error: czero should be median or average. Unknown option {0}'.format(czero))
         raise
@@ -1194,7 +1194,7 @@ def ImgCombineWithZeroFloating(imglistfname,outputfile,cmethod="median",czero="m
             img = img.rstrip()
             statlist.append(statfunction(fits.getdata(img)[Ymin-1:Ymax,Xmin-1:Xmax]))
     print('{0} of images: {1}'.format(czero,str(statlist)))
-    statAvg=np.mean(statlist)
+    statAvg=np.nanmean(statlist)
     Zeroshifts= statAvg - np.array(statlist)
     print('Zeroshifts of images: {0} :: ImgAvg ={1}'.format(str(Zeroshifts),statAvg))
     with open(outputfile+'_zeroshifts.txt','w') as zeroshiftFILE:
