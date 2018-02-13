@@ -2419,7 +2419,12 @@ class InstrumentObject(object):
             if fsearch:
                 prihdr[self.PC.OBJECTHDR] = fsearch.group(1)
                 prihdr[self.PC.FILTERHDR] = fsearch.group(2).upper()
-
+            # Add the X start and Ystart header objects
+            subimageformat = prihdr['SUBRECT']
+            prihdr[self.PC.XSTARTHDR] = int(subimageformat.split(',')[0])
+            prihdr[self.PC.XENDHDR] = int(subimageformat.split(',')[1])
+            prihdr[self.PC.YSTARTHDR] = int(subimageformat.split(',')[2])
+            prihdr[self.PC.YENDHDR] = int(subimageformat.split(',')[3])
         return prihdr
 
     def IdentifyFrame(self,ObjectLine):
