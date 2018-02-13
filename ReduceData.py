@@ -1206,7 +1206,6 @@ def ImgCombineWithZeroFloating(imglistfname,outputfile,cmethod="median",czero="m
 def Flat_basicCorrections_subrout(PC):
     """ This will create corresponding normalized flats and divide for flat correction. Also do mask pixel masking in end."""
     iraf.imcombine.unlearn()
-    iraf.imstatistics.unlearn()
     directories = LoadDirectories(PC,CONF=False)
 
     for night in directories:
@@ -1253,9 +1252,9 @@ def Flat_basicCorrections_subrout(PC):
                         OutMasterFlat = DivideSmoothGradient(PC,PC.GetFullPath(outflatname),PC.GetFullPath(OutMasterFlat))
                     else:
                         #We will normalise this flat with the mode of pixels in FlatStatSection
-                        statout = iraf.imstatistics(PC.GetFullPath(outflatname)+PC.FLATSTATSECTION,fields='mode',Stdout=1)
-                        mode = float(statout[1])
-                        iraf.imarith(operand1=PC.GetFullPath(outflatname),op="/",operand2=mode,result=PC.GetFullPath(OutMasterFlat))
+                        Xmin, Xmax, Ymin, Ymax = parse_slicingstring(PC.FLATSTATSECTION)
+                        mode = np.nanmedian(fits.getdata(PC.GetFullPath(outflatname))[Ymin-1:Ymax,Xmin-1:Xmax]) 
+                        imarithiraf(operand1=PC.GetFullPath(outflatname),op="/",operand2=mode,result=PC.GetFullPath(OutMasterFlat))
                     # Add to the dictionary
                     MasterFlatDic[FlatKey] = OutMasterFlat
                 finally:
@@ -1268,7 +1267,7 @@ def Flat_basicCorrections_subrout(PC):
             if ObjectFlatDic[objimgKey] is not None:  # Flat exists
                 print('Flat correcting '+objimg)
                 OutFCobjimg = os.path.splitext(objimg)[0]+'_FC.fits'
-                iraf.imarith(operand1=PC.GetFullPath(objimg),op="/",operand2=PC.GetFullPath(ObjectFlatDic[objimgKey]),result=PC.GetFullPath(OutFCobjimg))
+                imarithiraf(operand1=PC.GetFullPath(objimg),op="/",operand2=PC.GetFullPath(ObjectFlatDic[objimgKey]),result=PC.GetFullPath(OutFCobjimg))
                 # Update the name of output file.
                 OutFinalimg = OutFCobjimg 
             else:
@@ -1329,6 +1328,28 @@ def Flat_basicCorrections_subrout(PC):
         if PC.IMGCOMBINE == 'Y' : print('Edit the spaces (if required) between image sets in file '+os.path.join(PC.MOTHERDIR,PC.OUTDIR,night,OutObjectFinalfilename)+' to align and combine them in next step.')
     print('All nights over...')             
 
+
+def imarithiraf(operand1,op,operand2,result,overwrite=False):
+    """ numpy implementation of iraf's imarith """
+    with fits.open(operand1) as hdulist:
+        try :
+            opnd2 = float(operand2)
+        except ValueError:
+            opnd2 = fits.getdata(operand2)
+
+        if op == '+':
+            hdulist[0].data = hdulist[0].data + opnd2
+        elif op == '-':
+            hdulist[0].data = hdulist[0].data - opnd2
+        elif op == '*':
+            hdulist[0].data = hdulist[0].data * opnd2
+        elif op == '/':
+            hdulist[0].data = hdulist[0].data / opnd2
+        else:
+            print('Unknown operation : {0}'.format(op))
+            return None
+        hdulist[0].header['HISTORY'] = 'Operated {0} by {1}'.format(op,operand2)
+        hdulist.writeto(result,overwrite=overwrite)
 
 
 def Bias_Subtraction_subrout(PC,method="median"):
@@ -1475,7 +1496,7 @@ def Bias_Subtraction_subrout(PC,method="median"):
                     # Subtract bias form this flat image
                     BSflatimg = os.path.splitext(os.path.basename(flatimg))[0]+'_BS.fits'
                     if not os.path.isfile(PC.GetFullPath(BSflatimg)): #If the bias subtracted flat already doesn't exist.
-                        iraf.imarith(operand1=PC.GetFullPath(flatimg),op="-",operand2=PC.GetFullPath(OutMasterBias),result=PC.GetFullPath(BSflatimg))
+                        imarithiraf(operand1=PC.GetFullPath(flatimg),op="-",operand2=PC.GetFullPath(OutMasterBias),result=PC.GetFullPath(BSflatimg))
                     
                     SuperMasterFilterFlatdic.setdefault(Filtrfiledic[flatimgKey], []).append(PC.GetFullPath(BSflatimg))
 
@@ -1504,7 +1525,7 @@ def Bias_Subtraction_subrout(PC,method="median"):
                 BSlampimgs = [os.path.splitext(os.path.basename(lampimg))[0]+'_BS.fits'  for lampimg in Lampfiledic[objimgKey]]
                 for lampimg,bslampimg in zip(Lampfiledic[objimgKey],BSlampimgs):
                     if not os.path.isfile(PC.GetFullPath(bslampimg)): #If the bias subtracted lamp already doesn't exist.
-                        iraf.imarith(operand1=PC.GetFullPath(lampimg),op="-",operand2=PC.GetFullPath(ObjectBiasDic[objimgKey]),result=PC.GetFullPath(bslampimg))
+                        imarithiraf(operand1=PC.GetFullPath(lampimg),op="-",operand2=PC.GetFullPath(ObjectBiasDic[objimgKey]),result=PC.GetFullPath(bslampimg))
                 # Keep only the first lamp in the list, since we need only one for Wavelength calibration
                 try:
                     ObjectLampDic[objimgKey] = BSlampimgs[0]
@@ -1523,7 +1544,7 @@ def Bias_Subtraction_subrout(PC,method="median"):
                 BSflatimgs = [os.path.splitext(os.path.basename(flatimg))[0]+'_BS.fits'  for flatimg in Flatfiledic[objimgKey]]
                 for flatimg,bsflatimg in zip(Flatfiledic[objimgKey],BSflatimgs):
                     if not os.path.isfile(PC.GetFullPath(bsflatimg)): #If the bias subtracted flat already doesn't exist.
-                        iraf.imarith(operand1=PC.GetFullPath(flatimg),op="-",operand2=PC.GetFullPath(ObjectBiasDic[objimgKey]),result=PC.GetFullPath(bsflatimg))
+                        imarithiraf(operand1=PC.GetFullPath(flatimg),op="-",operand2=PC.GetFullPath(ObjectBiasDic[objimgKey]),result=PC.GetFullPath(bsflatimg))
             else:
                 print('ALERT: No Flats for doing flat correction of {0} from same night'.format(objimg))
                 BSflatimgs = []
@@ -1555,11 +1576,11 @@ def Bias_Subtraction_subrout(PC,method="median"):
                     ObjectSkyDic[objimgKey] = OutMasterSky
 
                 #Now subtract the sky form the science frame
-                iraf.imarith(operand1=PC.GetFullPath(objimg),op="-",operand2=PC.GetFullPath(ObjectSkyDic[objimgKey]),result=PC.GetFullPath(BiasRemovedObjimg))
+                imarithiraf(operand1=PC.GetFullPath(objimg),op="-",operand2=PC.GetFullPath(ObjectSkyDic[objimgKey]),result=PC.GetFullPath(BiasRemovedObjimg))
                                              
             else:  # Subtract the Bias directly
                 print('Subtracting Bias from '+objimg)
-                iraf.imarith(operand1=PC.GetFullPath(objimg),op="-",operand2=PC.GetFullPath(ObjectBiasDic[objimgKey]),result=PC.GetFullPath(BiasRemovedObjimg))
+                imarithiraf(operand1=PC.GetFullPath(objimg),op="-",operand2=PC.GetFullPath(ObjectBiasDic[objimgKey]),result=PC.GetFullPath(BiasRemovedObjimg))
 
             ObjectFinalImgDic[objimgKey] = BiasRemovedObjimg
 
