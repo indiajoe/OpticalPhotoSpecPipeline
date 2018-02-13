@@ -1167,13 +1167,20 @@ def FixBadPixels(PC,images,nightdir):
     iraf.fixpix.unlearn()
     iraf.fixpix(images=images,masks=PixelMask)
 
+def parse_slicingstring(slicingstring):
+    """ Returns the Xmin, Xmax, Ymin, and Y max inside a string representation of array splicing,
+    Example input '[200:800,200:800]'  
+    """
+    Xmin = int(slicingstring[1:-1].split(',')[0].split(':')[0])  #Everything now in fits coordinates
+    Xmax = int(slicingstring[1:-1].split(',')[0].split(':')[1])
+    Ymin = int(slicingstring[1:-1].split(',')[1].split(':')[0])
+    Ymax = int(slicingstring[1:-1].split(',')[1].split(':')[1])
+    return Xmin, Xmax, Ymin, Ymax
+
 def ImgCombineWithZeroFloating(imglistfname,outputfile,cmethod="median",czero="median",creject="avgsigclip",cstatsection='[200:800,200:800]'):
     """ Returns the combined image with actuall average median flux, It does zero scaleing only for sigma rejection of stars. This is needed to remove faint stars in rejection algorithm when the background sky itself is varying from frame to frame. """
     iraf.imcombine.unlearn()
-    Xmin=int(cstatsection[1:-1].split(',')[0].split(':')[0])  #Everything now in fits coordinates
-    Xmax=int(cstatsection[1:-1].split(',')[0].split(':')[1])
-    Ymin=int(cstatsection[1:-1].split(',')[1].split(':')[0])
-    Ymax=int(cstatsection[1:-1].split(',')[1].split(':')[1])
+    Xmin, Xmax, Ymin, Ymax = parse_slicingstring(cstatsection)
 
     if czero == "median" : statfunction = np.median
     elif czero == "average" : statfunction = np.mean
